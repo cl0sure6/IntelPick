@@ -36,7 +36,10 @@ docs, and this machine's WSL2 setup.
   retries instead of carrying air to the bin (`check_grasp`, `empty_grip_margin`, measured by
   `probe_arm`). The squeeze is limited with `T:107` (`grip_torque`, default 30 %) so a stalled
   servo doesn't overheat.
-- **Sorted objects get detected again.** Keep the bins outside the camera's pick zone (`roi` param).
+- **Where objects may lie.** Only inside the area enclosed by the calibration markers (put them on the
+  corners of a plain matte mat), inside the reach ring, and in camera view. The detector enforces
+  the marker area (`workspace_margin`) and draws it green on `/detections/image`; ignored objects
+  get a grey ring. Keep the bins off the mat, or sorted objects get picked again.
 - **The arm blocks the view.** The sorter only trusts detections after the arm is home and a stable
   object has been seen for N frames in a row.
 - **Lighting.** HSV ranges drift between daylight and lamps. Tune under demo conditions.
@@ -61,8 +64,8 @@ flowchart LR
 | `intelpick/camera_node.py` | Camera → `sensor_msgs/Image` |
 | `intelpick/detectors/color.py` | HSV masks → blobs (centroid, angle, fill ratio as confidence) |
 | `intelpick/detectors/yolo.py` | Ultralytics model → boxes, optionally tagged with dominant colour (`red_cube`) |
-| `intelpick/detector_node.py` | Runs a backend, applies ROI + calibration, publishes detections + overlay |
-| `intelpick/calibration.py` | Fit / load / apply the pixel → table homography; remembers the image size |
+| `intelpick/detector_node.py` | Runs a backend, maps pixels to the table, drops objects outside the workspace, publishes detections + overlay |
+| `intelpick/calibration.py` | Fit / load / apply the pixel → table homography; remembers the image size and the workspace (marker hull) |
 | `intelpick/roarm.py` | ROS-free RoArm client (serial / HTTP / dry-run), M2 vs M3 command format |
 | `intelpick/arm_node.py` | ROS services around `roarm.py`; metres in ROS, mm on the wire |
 | `intelpick/sorter_node.py` | Stable target → hover → descend → grip → lift → bin → release → home |
@@ -98,8 +101,8 @@ ROS topics use **metres**; the JSON protocol uses **millimetres**.
 
 Target hardware: **RoArm-M2-S** (confirmed). The M3 code path is kept but secondary.
 
-Verified here (WSL, no hardware): both packages build; 16 unit tests pass (colour detection,
-calibration round-trip and image-size check, radial/vertical grasp paths, M2/M3 command encoding,
+Verified here (WSL, no hardware): both packages build; 19 unit tests pass (colour detection,
+calibration round-trip, image-size check and workspace polygon, radial/vertical grasp paths, M2/M3 command encoding,
 gripper feedback and torque, network camera against a local MJPEG server incl. reconnect);
 a launch with `camera:=http://…` streamed, detected and sorted; `probe_arm --dry-run` runs all its steps; a full `ros2 launch` in `dry_run` with a
 synthetic camera image detected the object, mapped it to the right table position and ran

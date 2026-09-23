@@ -102,3 +102,33 @@ def test_vertical_approach_and_offset():
 def test_min_pick_radius_accounts_for_standoff():
     assert min_pick_radius(0.12, 'radial', 0.04) == pytest.approx(0.16)
     assert min_pick_radius(0.12, 'vertical', 0.04) == pytest.approx(0.12)
+
+
+def _mat_calibration():
+    # Markers on the corners of a 20 x 30 cm mat, 1 px = 1 mm, image centre over (0.25, 0).
+    pixels = [(170, 140), (470, 140), (470, 340), (170, 340), (320, 240)]  # + centre marker
+    table = [(0.25 - (v - 240) * 0.001, -(u - 320) * 0.001) for u, v in pixels]
+    return TableCalibration.fit(pixels, table, table_z=-0.05, image_size=(640, 480)), pixels
+
+
+def test_workspace_is_hull_of_calibration_points():
+    calib, _ = _mat_calibration()
+    assert len(calib.workspace) == 4  # centre marker is inside, not a corner
+    assert calib.in_workspace(0.25, 0.0)
+    assert calib.in_workspace(0.34, 0.14)             # near a corner, inside
+    assert not calib.in_workspace(0.25, 0.20)         # 5 cm beyond the side
+    assert calib.in_workspace(0.25, 0.155, margin=0.01)       # 5 mm out, within margin
+    assert not calib.in_workspace(0.25, 0.145, margin=-0.01)  # shrunk zone
+
+
+def test_workspace_outline_maps_back_to_marker_pixels(tmp_path):
+    calib, pixels = _mat_calibration()
+    calib.save(tmp_path / 'c.yaml')
+    outline = TableCalibration.load(tmp_path / 'c.yaml').workspace_pixels()
+    assert sorted(map(tuple, outline.tolist())) == sorted(pixels[:4])
+
+
+def test_old_calibration_without_workspace_excludes_nothing():
+    calib = TableCalibration(np.eye(3), 0.0)
+    assert calib.in_workspace(5.0, 5.0)
+    assert calib.workspace_pixels() is None

@@ -49,7 +49,8 @@ ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true
 ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true camera:=http://<phone-ip>:4747/video
 ros2 run rqt_image_view rqt_image_view /detections/image
 
-# Calibrate (arm_node must NOT be running)
+# Calibrate (arm_node must NOT be running). Markers go on the corners of the work mat:
+# the area they enclose becomes the pick zone, everything outside it is ignored.
 ros2 run intelpick calibrate --model m2 --port /dev/ttyUSB0
 
 # Full cell

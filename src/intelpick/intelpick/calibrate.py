@@ -4,7 +4,8 @@ Run with the arm_node stopped (this tool opens the serial port itself):
     ros2 run intelpick calibrate --port /dev/ttyUSB0 --model m2 --out ~/.intelpick/calibration.yaml
     ros2 run intelpick calibrate --camera http://192.168.1.23:4747/video     # Wi-Fi camera
 
-Put 4-9 small markers (paper dots) spread over the pick area, then for each one:
+Put 4-9 small markers (paper dots) on the corners (and middle) of the work mat. The area they
+enclose becomes the pick zone: objects outside it are ignored. Then for each marker:
   1. click the marker in the image window (arm out of the way),
   2. move the limp arm by hand until the gripper tip touches the marker,
   3. press SPACE to record the arm position.
@@ -67,6 +68,9 @@ def main():
                 continue
             frame = latest.copy()
             size = (frame.shape[1], frame.shape[0])
+            if len(pixels) >= 3:  # the pick zone so far
+                hull = cv2.convexHull(np.array(pixels, np.int32))
+                cv2.polylines(frame, [hull], True, (0, 255, 0), 1, cv2.LINE_AA)
             for i, (u, v) in enumerate(pixels):
                 cv2.circle(frame, (u, v), 6, (0, 255, 0), 2)
                 cv2.putText(frame, str(i + 1), (u + 8, v - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
@@ -104,6 +108,9 @@ def main():
                 calib.save(args.out)
                 print(f'saved {args.out}: rms {calib.rms_error * 1000:.1f} mm, '
                       f'table_z {calib.table_z * 1000:.1f} mm, image {size[0]}x{size[1]}')
+                ws = calib.workspace
+                print(f'pick zone: {len(ws)}-corner polygon, x {ws[:, 0].min():.3f}..'
+                      f'{ws[:, 0].max():.3f} m, y {ws[:, 1].min():.3f}..{ws[:, 1].max():.3f} m')
                 if calib.rms_error > 0.005:
                     print('rms above 5 mm: re-check markers or camera focus before trusting it')
                 saved = True

@@ -25,8 +25,10 @@ class DetectorNode(Node):
                   for n in names}
         min_area = self.declare_parameter('min_area', 300).value
         max_area = self.declare_parameter('max_area', 40000).value
-        # Pixel rectangle [u0, v0, u1, v1] where objects are picked up. Keep the bins outside it,
-        # or sorted objects get picked again.
+        # Objects must lie inside the calibrated area (convex hull of the calibration points),
+        # grown by this margin in metres. Negative shrinks it.
+        self.workspace_margin = self.declare_parameter('workspace_margin', 0.01).value
+        # Optional extra pixel rectangle [u0, v0, u1, v1]; all zeros = off.
         self.roi = list(self.declare_parameter('roi', [0, 0, 0, 0]).value)
         calib_file = self.declare_parameter('calibration_file', '').value
 
@@ -47,6 +49,9 @@ class DetectorNode(Node):
             self.calib = TableCalibration.load(calib_file)
             self.get_logger().info(
                 f'calibration {calib_file}: rms {self.calib.rms_error * 1000:.1f} mm')
+            if self.calib.workspace is None:
+                self.get_logger().warn('calibration has no workspace outline (made by an older '
+                                       'version): re-run calibrate to limit picks to the mat')
         else:
             self.get_logger().warn('no calibration loaded, x/y will be NaN (run calibrate)')
 
@@ -70,26 +75,37 @@ class DetectorNode(Node):
                 're-run calibrate. Positions disabled.', throttle_duration_sec=5.0)
             calib = None
         out = DetectionArray(header=msg.header)
+        rejected = []
         for b in self.detector.detect(frame):
-            if not self.in_roi(b.u, b.v):
-                continue
             x, y = calib.pixel_to_table(b.u, b.v) if calib else (math.nan, math.nan)
+            outside = calib is not None and not calib.in_workspace(x, y, self.workspace_margin)
+            if outside or not self.in_roi(b.u, b.v):
+                rejected.append(b)
+                continue
             out.detections.append(Detection(
                 label=b.label, confidence=float(b.confidence), u=float(b.u), v=float(b.v),
                 angle=float(b.angle), area_px=float(b.area), x=float(x), y=float(y)))
         self.pub.publish(out)
 
         if self.pub_img.get_subscription_count():
-            self.pub_img.publish(self.bridge.cv2_to_imgmsg(self.draw(frame, out), 'bgr8'))
+            img = self.draw(frame, out, rejected, calib)
+            self.pub_img.publish(self.bridge.cv2_to_imgmsg(img, 'bgr8'))
 
-    def draw(self, frame, out):
+    def draw(self, frame, out, rejected, calib):
+        outline = calib.workspace_pixels() if calib else None
+        if outline is not None:
+            cv2.polylines(frame, [outline.reshape(-1, 1, 2)], True, (0, 255, 0), 2, cv2.LINE_AA)
         u0, v0, u1, v1 = self.roi
         if u1 > u0:
             cv2.rectangle(frame, (u0, v0), (u1, v1), (255, 255, 255), 1)
+        for b in rejected:  # seen but ignored: outside the workspace / roi
+            cv2.circle(frame, (int(b.u), int(b.v)), 5, (128, 128, 128), 2)
         for d in out.detections:
             c = (int(d.u), int(d.v))
             cv2.circle(frame, c, 5, (255, 255, 255), -1)
-            text = d.label if math.isnan(d.x) else f'{d.label} {d.x * 100:.0f},{d.y * 100:.0f}cm'
+            text = d.label
+            if not math.isnan(d.x):
+                text += f' ({d.x * 100:.0f}, {d.y * 100:.0f}) cm'
             cv2.putText(frame, text, (c[0] + 8, c[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         (255, 255, 255), 1, cv2.LINE_AA)
         return frame

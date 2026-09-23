@@ -23,7 +23,10 @@ detector:
       yellow: [20, 120, 100, 35, 255, 255]
     min_area: 300
     max_area: 40000
-    roi: [0, 0, 0, 0]         # [u0, v0, u1, v1] pick zone in pixels; all zeros = whole image
+    # Pick zone = area covered by the calibration markers (put them on the mat's corners),
+    # grown by this margin. Objects outside it are ignored and drawn grey on the overlay.
+    workspace_margin: 0.01    # metres; negative shrinks the zone
+    roi: [0, 0, 0, 0]         # optional extra pixel rectangle [u0, v0, u1, v1]; zeros = off
     yolo_model: yolo26n.pt    # replace with your trained best.pt
     yolo_conf: 0.5
     yolo_color_tag: true      # label becomes "<color>_<class>"
