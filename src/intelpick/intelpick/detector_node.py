@@ -62,11 +62,18 @@ class DetectorNode(Node):
 
     def on_image(self, msg):
         frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+        calib = self.calib
+        if calib and not calib.matches(msg.width, msg.height):
+            self.get_logger().error(
+                f'image is {msg.width}x{msg.height} but calibration was made at '
+                f'{calib.image_size[0]}x{calib.image_size[1]}: fix the camera resolution or '
+                're-run calibrate. Positions disabled.', throttle_duration_sec=5.0)
+            calib = None
         out = DetectionArray(header=msg.header)
         for b in self.detector.detect(frame):
             if not self.in_roi(b.u, b.v):
                 continue
-            x, y = self.calib.pixel_to_table(b.u, b.v) if self.calib else (math.nan, math.nan)
+            x, y = calib.pixel_to_table(b.u, b.v) if calib else (math.nan, math.nan)
             out.detections.append(Detection(
                 label=b.label, confidence=float(b.confidence), u=float(b.u), v=float(b.v),
                 angle=float(b.angle), area_px=float(b.area), x=float(x), y=float(y)))

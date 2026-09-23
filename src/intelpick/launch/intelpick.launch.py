@@ -2,6 +2,7 @@
 
     ros2 launch intelpick intelpick.launch.py dry_run:=true            # no arm attached
     ros2 launch intelpick intelpick.launch.py serial_port:=/dev/ttyUSB0 model:=m2
+    ros2 launch intelpick intelpick.launch.py camera:=http://192.168.1.23:4747/video
 """
 
 import os
@@ -12,12 +13,14 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     share = get_package_share_directory('intelpick')
     args = {
         'params': os.path.join(share, 'config', 'intelpick.yaml'),
+        'camera': '/dev/video0',  # device, index or stream URL (keep passwords out of the YAML)
         'calibration_file': os.path.expanduser('~/.intelpick/calibration.yaml'),
         'dry_run': 'false',
         'model': 'm2',
@@ -31,7 +34,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         *[DeclareLaunchArgument(k, default_value=v) for k, v in args.items()],
-        Node(package='intelpick', executable='camera_node', name='camera', parameters=[params]),
+        Node(package='intelpick', executable='camera_node', name='camera',
+             parameters=[params, {'device': ParameterValue(cfg['camera'], value_type=str)}]),
         Node(package='intelpick', executable='detector_node', name='detector',
              parameters=[params, calib, {'backend': cfg['backend']}]),
         Node(package='intelpick', executable='arm_node', name='arm',

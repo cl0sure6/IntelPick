@@ -46,6 +46,7 @@ ros2 service call /arm/move_to intelpick_interfaces/srv/MoveTo "{x: 0.25, y: 0.0
 
 # Camera + detector only, tune HSV while watching the overlay
 ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true
+ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true camera:=http://<phone-ip>:4747/video
 ros2 run rqt_image_view rqt_image_view /detections/image
 
 # Calibrate (arm_node must NOT be running)
@@ -54,6 +55,21 @@ ros2 run intelpick calibrate --model m2 --port /dev/ttyUSB0
 # Full cell
 ros2 launch intelpick intelpick.launch.py model:=m2 serial_port:=/dev/ttyUSB0
 ```
+
+### Wi-Fi camera (phone app or IP camera)
+
+`camera:=` (and `calibrate --camera`) take a device, an index or a stream URL:
+
+| Source | URL (check the app's screen for the exact one) |
+|---|---|
+| DroidCam (Android/iOS) | `http://<phone-ip>:4747/video` |
+| IP Webcam (Android) | `http://<phone-ip>:8080/video` |
+| Wi-Fi security camera | `rtsp://user:pass@<ip>:554/<stream>` (pass on the command line, not in the YAML) |
+
+The phone must be on the same Wi-Fi as the PC; WSL reaches it through Windows, no usbipd needed.
+Set the resolution in the app (640×480 is plenty), then calibrate. The calibration records the
+image size and the detector refuses to compute positions if the stream's resolution changes.
+Network streams lag; keep `settle_time` above the lag you see.
 
 Tunables live in [src/intelpick/config/intelpick.yaml](src/intelpick/config/intelpick.yaml).
 

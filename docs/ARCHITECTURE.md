@@ -15,7 +15,7 @@ docs, and this machine's WSL2 setup.
 | 2 | "YOLOv8, installed with one command" | **True, with a catch** | `pip install ultralytics` works. The current Ultralytics model is **YOLO26**, with the same API (only the weights name changes); YOLOv8 still works. **Catch:** pip pulls in NumPy 2.x, which breaks ROS Humble's `cv_bridge` (built against NumPy 1.21). Install with `pip install ultralytics "numpy<2"`. Licence is AGPL-3.0: fine for a student project, not for closed commercial use. |
 | 3 | "OpenCV, 1 command" | **True, already done** | OpenCV 4.5.4 is already installed in WSL (`python3-opencv` from the ROS install). Don't also `pip install opencv-python`; two copies conflict. |
 | 4 | "RoArm probably has a ready ROS 2 driver" | **True (M2-S and M3)** | [`waveshareteam/roarm_ws`](https://github.com/waveshareteam/roarm_ws) targets **ROS 2 Humble on Ubuntu 22.04**, exactly what this WSL has. But its XYZ services (`/move_joint_cmd`, …) sit on top of **MoveIt 2**, which is heavy and not installed. This project uses a **thin driver of its own** (`arm_node`) that speaks the arm's documented JSON protocol (`T:104` move to XYZ, `T:105` read position, `T:106` gripper) over USB-serial or Wi-Fi. `roarm_ws` is still useful later for the URDF and RViz. The old RoArm-M1 uses a different protocol. |
-| 5 | "Any USB webcam" | **True, but WSL can't see it by default** | WSL2 does not see USB devices until they are forwarded with **usbipd-win** (installed, v5.3.0). The WSL kernel (6.18) includes `uvcvideo` (webcams) and `cp210x` (the M2-S board's CP2102 USB-serial chip, VID:PID `10c4:ea60`), so forwarding will work. USBPcap is installed on this PC, so `usbipd bind` needs `--force`. Use MJPG at 640×480 to keep USB/IP bandwidth low. Alternative: drive the arm over its Wi-Fi AP (`host:=192.168.4.1`) and forward only the camera. |
+| 5 | "Any USB webcam" | **True, but WSL can't see it by default** | WSL2 does not see USB devices until they are forwarded with **usbipd-win** (installed, v5.3.0). The WSL kernel (6.18) includes `uvcvideo` (webcams) and `cp210x` (the M2-S board's CP2102 USB-serial chip, VID:PID `10c4:ea60`), so forwarding will work. USBPcap is installed on this PC, so `usbipd bind` needs `--force`. Use MJPG at 640×480 to keep USB/IP bandwidth low. **Wi-Fi cameras need no usbipd:** `camera:=http://…` or `rtsp://…` works too (phone app for now). The arm can also go over its own Wi-Fi AP (`host:=192.168.4.1`). |
 | 6 | "YOLO → ROS 2 passes coordinates → arm" | **Missing a step** | YOLO outputs **pixels**; the arm needs **millimetres in its own frame**. You need a **camera→table calibration** (a homography, since the table is flat). One webcam, no depth camera: this works because every object lies on the same plane. Tool: `ros2 run intelpick calibrate`. |
 | 7 | "Little code, libraries do 80%" | **Mostly true** | This draft is ~900 lines of Python, including comments. Most of the real effort goes into things libraries don't do: calibration, HSV tuning under your lighting, grasp heights, reach limits, and the arm blocking the camera while it moves. |
 | 8 | "Cheap" | **True** | Webcam + coloured objects + the arm you have. A fixed top-down camera mount (phone holder, desk lamp arm) matters more than camera quality. |
@@ -57,11 +57,12 @@ flowchart LR
 | Package / file | Role |
 |---|---|
 | `intelpick_interfaces` | `Detection`, `DetectionArray` msgs; `MoveTo`, `SetGripper` srvs |
-| `intelpick/camera_node.py` | Webcam → `sensor_msgs/Image` (MJPG, newest frame only) |
+| `intelpick/camera_source.py` | Opens USB (V4L2) or network (HTTP/RTSP) cameras; newest frame only, reconnects after Wi-Fi drops |
+| `intelpick/camera_node.py` | Camera → `sensor_msgs/Image` |
 | `intelpick/detectors/color.py` | HSV masks → blobs (centroid, angle, fill ratio as confidence) |
 | `intelpick/detectors/yolo.py` | Ultralytics model → boxes, optionally tagged with dominant colour (`red_cube`) |
 | `intelpick/detector_node.py` | Runs a backend, applies ROI + calibration, publishes detections + overlay |
-| `intelpick/calibration.py` | Fit / load / apply the pixel → table homography |
+| `intelpick/calibration.py` | Fit / load / apply the pixel → table homography; remembers the image size |
 | `intelpick/roarm.py` | ROS-free RoArm client (serial / HTTP / dry-run), M2 vs M3 command format |
 | `intelpick/arm_node.py` | ROS services around `roarm.py`; metres in ROS, mm on the wire |
 | `intelpick/sorter_node.py` | Stable target → hover → descend → grip → lift → bin → release → home |
@@ -97,9 +98,10 @@ ROS topics use **metres**; the JSON protocol uses **millimetres**.
 
 Target hardware: **RoArm-M2-S** (confirmed). The M3 code path is kept but secondary.
 
-Verified here (WSL, no hardware): both packages build; 12 unit tests pass (colour detection,
-calibration round-trip, radial/vertical grasp paths, M2/M3 command encoding, gripper feedback and
-torque); `probe_arm --dry-run` runs all its steps; a full `ros2 launch` in `dry_run` with a
+Verified here (WSL, no hardware): both packages build; 16 unit tests pass (colour detection,
+calibration round-trip and image-size check, radial/vertical grasp paths, M2/M3 command encoding,
+gripper feedback and torque, network camera against a local MJPEG server incl. reconnect);
+a launch with `camera:=http://…` streamed, detected and sorted; `probe_arm --dry-run` runs all its steps; a full `ros2 launch` in `dry_run` with a
 synthetic camera image detected the object, mapped it to the right table position and ran
 complete pick-and-place cycles including the grasp check.
 

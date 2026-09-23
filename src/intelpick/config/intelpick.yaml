@@ -1,4 +1,6 @@
 # Default parameters. Copy and edit, then pass with: ros2 launch intelpick intelpick.launch.py params:=<file>
+# camera device, detector backend, arm model and serial_port are launch arguments, not set here:
+# a value in this file would silently win over the launch argument.
 # Shared by arm (commands it) and sorter (checks whether the jaws closed on something).
 /**:
   ros__parameters:
@@ -6,14 +8,12 @@
 
 camera:
   ros__parameters:
-    device: /dev/video0
-    width: 640
+    width: 640                # USB only; set a stream's resolution in the phone app / camera
     height: 480
     fps: 15.0
 
 detector:
   ros__parameters:
-    backend: color            # color | yolo
     color_names: [red, green, blue, yellow]
     # OpenCV HSV ranges, 6 ints per range: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi]. Red needs two.
     colors:
@@ -30,8 +30,6 @@ detector:
 
 arm:
   ros__parameters:
-    model: m2                 # m2 (RoArm-M2-S) | m3 (RoArm-M3)
-    serial_port: /dev/ttyUSB0 # M2-S board uses a CP2102 USB-serial chip
     host: ""                  # set to the arm IP to drive it over Wi-Fi instead of USB
     speed: 0.25
     gripper_open: 1.6         # rad; 1.08 = fully open (135 deg), 3.14 = closed
@@ -51,7 +49,7 @@ sorter:
     max_reach: 0.40
     stable_frames: 5
     stable_tol: 0.01
-    settle_time: 1.0
+    settle_time: 1.0          # s after homing before trusting the camera; must exceed stream lag
     max_picks: 0
     # M2-S is 4-DOF: the clamp's pitch can't be commanded, so default to sliding in from the side.
     approach: radial          # radial | vertical
