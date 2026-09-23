@@ -1,0 +1,5 @@
+bool open
+---
+bool success
+string message
+float32 angle   # clamp angle measured after the move (rad), NaN if unknown

@@ -1,0 +1,63 @@
+# Default parameters. Copy and edit, then pass with: ros2 launch intelpick intelpick.launch.py params:=<file>
+# Shared by arm (commands it) and sorter (checks whether the jaws closed on something).
+/**:
+  ros__parameters:
+    gripper_closed: 3.1       # rad, 3.14 = jaws touching
+
+camera:
+  ros__parameters:
+    device: /dev/video0
+    width: 640
+    height: 480
+    fps: 15.0
+
+detector:
+  ros__parameters:
+    backend: color            # color | yolo
+    color_names: [red, green, blue, yellow]
+    # OpenCV HSV ranges, 6 ints per range: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi]. Red needs two.
+    colors:
+      red: [0, 120, 70, 10, 255, 255, 170, 120, 70, 179, 255, 255]
+      green: [40, 80, 50, 85, 255, 255]
+      blue: [95, 120, 50, 130, 255, 255]
+      yellow: [20, 120, 100, 35, 255, 255]
+    min_area: 300
+    max_area: 40000
+    roi: [0, 0, 0, 0]         # [u0, v0, u1, v1] pick zone in pixels; all zeros = whole image
+    yolo_model: yolo26n.pt    # replace with your trained best.pt
+    yolo_conf: 0.5
+    yolo_color_tag: true      # label becomes "<color>_<class>"
+
+arm:
+  ros__parameters:
+    model: m2                 # m2 (RoArm-M2-S) | m3 (RoArm-M3)
+    serial_port: /dev/ttyUSB0 # M2-S board uses a CP2102 USB-serial chip
+    host: ""                  # set to the arm IP to drive it over Wi-Fi instead of USB
+    speed: 0.25
+    gripper_open: 1.6         # rad; 1.08 = fully open (135 deg), 3.14 = closed
+    grip_torque: 30           # % of servo max; enough to hold a cube without cooking the servo
+    m3_pitch: 1.57            # M3 only: wrist pitch for a top-down grasp, verify on hardware
+
+sorter:
+  ros__parameters:
+    bin_labels: [red, green, blue, yellow]
+    # Bin drop points in the arm frame, metres: x0, y0, x1, y1, ... (+X forward, +Y left)
+    bin_positions: [0.05, 0.25, 0.15, 0.25, 0.05, -0.25, 0.15, -0.25]
+    table_z: -0.05            # used only when no calibration_file is given
+    grasp_height: 0.015       # above the table: about half the object height
+    place_height: 0.06
+    hover_height: 0.10
+    min_reach: 0.12
+    max_reach: 0.40
+    stable_frames: 5
+    stable_tol: 0.01
+    settle_time: 1.0
+    max_picks: 0
+    # M2-S is 4-DOF: the clamp's pitch can't be commanded, so default to sliding in from the side.
+    approach: radial          # radial | vertical
+    standoff: 0.04            # radial: descend this far short of the object, then slide out
+    grasp_offset: 0.0         # push the tip this far past the object centre (tune on hardware)
+    speed: 0.0                # travel moves, 0 = arm default
+    approach_speed: 0.1       # moves near the object
+    check_grasp: true
+    empty_grip_margin: 0.08   # closed within this of gripper_closed = nothing grabbed
