@@ -20,7 +20,7 @@ from intelpick_interfaces.msg import DetectionArray
 from intelpick_interfaces.srv import MoveTo, SetGripper
 
 from .calibration import TableCalibration
-from .grasp import min_pick_radius, pick_waypoints
+from .grasp import is_empty_grip, min_pick_radius, pick_steps, place_steps
 
 
 class SorterNode(Node):
@@ -138,21 +138,24 @@ class SorterNode(Node):
         self.get_logger().info(
             f'{d.label} at ({d.x:.3f}, {d.y:.3f}) m -> bin ({bx:.3f}, {by:.3f})')
         self.ignore_detections_for(1e9)
-        self.grip(True)
-        waypoints = pick_waypoints(d.x, d.y, self.z_grasp, self.z_hover, self.approach,
-                                   self.standoff, self.grasp_offset)
-        for x, y, z, slow in waypoints:
-            self.move(x, y, z, slow)
-        angle = self.grip(False)
-        gx, gy = waypoints[-1][:2]
-        self.move(gx, gy, self.z_hover, slow=True)  # lift before bailing out, never drag
-        if self.check_grasp and not math.isnan(angle) and \
-                angle >= self.gripper_closed - self.empty_margin:
+        angle = math.nan
+        for step in pick_steps(d.x, d.y, self.z_grasp, self.z_hover, self.approach,
+                               self.standoff, self.grasp_offset):
+            if step.kind == 'close':
+                angle = self.run_step(step)
+            else:
+                self.run_step(step)
+        if self.check_grasp and is_empty_grip(angle, self.gripper_closed, self.empty_margin):
             raise RuntimeError(f'nothing in the gripper (clamp closed to {angle:.2f} rad)')
-        self.move(bx, by, self.z_hover)
-        self.move(bx, by, self.z_place)
-        self.grip(True)
-        self.move(bx, by, self.z_hover)
+        for step in place_steps(bx, by, self.z_place, self.z_hover):
+            self.run_step(step)
+
+    def run_step(self, step):
+        """Execute one grasp.Step; returns the measured clamp angle for open/close."""
+        if step.kind == 'move':
+            self.move(step.x, step.y, step.z, step.slow)
+            return None
+        return self.grip(step.kind == 'open')
 
     def run(self):
         self.home()

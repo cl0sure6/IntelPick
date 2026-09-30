@@ -60,7 +60,7 @@ sorter:
     standoff: 0.04            # radial: descend this far short of the object, then slide out
     grasp_offset: 0.0         # push the tip this far past the object centre (tune on hardware)
     speed: 0.0                # travel moves, 0 = arm default
-    approach_speed: 0.1       # moves near the object
+    approach_speed: 0.05      # moves near the object; 0.1 knocked a cube loose 1 in 3, 0.05 held 5/5
     check_grasp: true
     # Closed within this of gripper_closed = nothing grabbed. probe_arm: empty 3.09 rad,
     # on a 2-3 cm object 2.99 rad, so the threshold sits at 3.04. Thin objects won't register.

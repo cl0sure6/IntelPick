@@ -69,7 +69,8 @@ flowchart LR
 | `intelpick/roarm.py` | ROS-free RoArm client (serial / HTTP / dry-run), M2 vs M3 command format |
 | `intelpick/arm_node.py` | ROS services around `roarm.py`; metres in ROS, mm on the wire |
 | `intelpick/sorter_node.py` | Stable target → hover → descend → grip → lift → bin → release → home |
-| `intelpick/grasp.py` | Pick waypoints: `radial` (M2-S default) or `vertical` |
+| `intelpick/grasp.py` | Pick/place step lists shared by the sorter and `grasp_trial`: `radial` (M2-S default) or `vertical`; empty-grip check |
+| `intelpick/grasp_trial.py` | Tune the grasp on a known spot: sorter's exact sequence, grip check vs. what you saw, put back |
 | `intelpick/probe_arm.py` | Hardware bring-up: link, blocking behaviour, clamp angles, table height, reach |
 | `intelpick/calibrate.py` | Interactive tool: click a marker, touch it with the limp arm, SPACE |
 | `config/intelpick.yaml` | Every tunable: HSV ranges, ROI, bins, heights, reach, speeds |
@@ -90,7 +91,7 @@ ROS topics use **metres**; the JSON protocol uses **millimetres**.
 | # | Milestone | Done when |
 |---|---|---|
 | M0 | USB into WSL | `/dev/video0` and `/dev/ttyUSB0` visible in Ubuntu |
-| M1 | Arm alone | `probe_arm` run end to end; its measured values copied into the config; `approach` chosen; `ros2 service call /arm/move_to …` moves the real arm |
+| M1 | Arm alone | `probe_arm` values in the config (done 2026-09-30); `grasp_trial` holds the object 3/3 at a few spots with the grip check agreeing |
 | M2 | Vision alone | Stable colour detections in `rqt_image_view` under demo lighting |
 | M3 | Calibration | RMS < 5 mm; arm hovers exactly over a detected object |
 | M4 | Colour sorting loop | 10 objects sorted unattended; log success rate |

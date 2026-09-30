@@ -29,6 +29,7 @@ setup(
             'sorter_node = intelpick.sorter_node:main',
             'calibrate = intelpick.calibrate:main',
             'probe_arm = intelpick.probe_arm:main',
+            'grasp_trial = intelpick.grasp_trial:main',
         ],
     },
 )

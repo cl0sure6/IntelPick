@@ -40,6 +40,11 @@ While attached, the device disappears from Windows. In Ubuntu, once:
 # First contact with the real arm (M1): measures what the docs don't say, prints config values
 ros2 run intelpick probe_arm --port /dev/ttyUSB0      # add --dry-run to rehearse without the arm
 
+# Tune the grasp: pick an object from a known spot with the sorter's exact sequence, put it back.
+# Defaults come from the config; override to experiment, then copy what works back into it.
+ros2 run intelpick grasp_trial --x 0.25 --y 0.0 --tries 3
+ros2 run intelpick grasp_trial --x 0.25 --grasp-height 0.01 --standoff 0.05 --open 1.3
+
 # Arm only, no hardware: exercise the services
 ros2 run intelpick arm_node --ros-args -p dry_run:=true
 ros2 service call /arm/move_to intelpick_interfaces/srv/MoveTo "{x: 0.25, y: 0.0, z: 0.05}"
@@ -71,6 +76,9 @@ The phone must be on the same Wi-Fi as the PC; WSL reaches it through Windows, n
 Set the resolution in the app (640×480 is plenty), then calibrate. The calibration records the
 image size and the detector refuses to compute positions if the stream's resolution changes.
 Network streams lag; keep `settle_time` above the lag you see.
+
+Only one program can drive the arm at a time (`arm_node`, `probe_arm`, `calibrate`,
+`grasp_trial`); the driver locks the serial port and a second one is refused.
 
 Tunables live in [src/intelpick/config/intelpick.yaml](src/intelpick/config/intelpick.yaml).
 

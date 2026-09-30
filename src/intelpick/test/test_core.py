@@ -6,7 +6,7 @@ import pytest
 
 from intelpick.calibration import TableCalibration
 from intelpick.detectors.color import DEFAULT_COLORS, ColorDetector
-from intelpick.grasp import min_pick_radius, pick_waypoints
+from intelpick.grasp import is_empty_grip, min_pick_radius, pick_steps, pick_waypoints, place_steps
 from intelpick.roarm import Pose, RoArm
 
 
@@ -156,3 +156,40 @@ def test_move_waits_for_stop_and_reports_miss():
     assert not arm.move_to(300, 0, 200, tol=15, timeout=3)
     assert arm.last_error == pytest.approx(20)
     assert arm.move_to(300, 0, 200, tol=25, timeout=3)
+
+
+def test_pick_steps_open_approach_close_then_lift():
+    steps = pick_steps(0.25, 0.0, z_grasp=-0.09, z_hover=-0.005, approach='radial', standoff=0.04)
+    # the last close re-reads the grip after the lift (catches objects slipping out)
+    assert [s.kind for s in steps] == ['open', 'move', 'move', 'move', 'close', 'move', 'close']
+    slide, lift = steps[3], steps[5]
+    assert (slide.x, slide.z) == pytest.approx((0.25, -0.09))
+    assert (lift.x, lift.y, lift.z) == pytest.approx((0.25, 0.0, -0.005))  # straight up
+    assert all(s.what for s in steps)
+
+
+def test_place_steps_release_at_the_bottom():
+    steps = place_steps(0.05, 0.25, z_place=-0.045, z_hover=-0.005)
+    assert [s.kind for s in steps] == ['move', 'move', 'open', 'move']
+    assert steps[1].z == pytest.approx(-0.045)
+
+
+def test_empty_grip_threshold():
+    # measured on the real M2-S: empty 3.094, holding a 2-3 cm object 2.988
+    assert is_empty_grip(3.094, 3.1, 0.06)
+    assert not is_empty_grip(2.988, 3.1, 0.06)
+    assert not is_empty_grip(float('nan'), 3.1, 0.06)
+    assert not is_empty_grip(None, 3.1, 0.06)
+
+
+def test_grasp_trial_puts_the_object_back_where_it_was(monkeypatch):
+    from intelpick import grasp_trial
+    monkeypatch.setattr('sys.argv', ['grasp_trial', '--dry-run', '--auto', '--x', '0.25',
+                                     '--table-z', '-0.105', '--grasp-height', '0.015'])
+    monkeypatch.setattr('builtins.input', lambda prompt='': 'y')  # "yes, it's holding"
+    trial = grasp_trial.Trial(grasp_trial.parse_args())
+    trial.main()
+    moves = [(c['x'], c['y'], c['z']) for c in trial.arm.sent if c['T'] == 104]
+    assert all(np.hypot(x, y) > 150 for x, y, _ in moves)  # never towards the base
+    at_grasp_spot = [m for m in moves if m == pytest.approx((250, 0, -90))]
+    assert len(at_grasp_spot) == 2  # slide onto it, then set it back down there

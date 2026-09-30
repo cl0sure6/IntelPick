@@ -82,7 +82,13 @@ class RoArm:
         # (measured on a RoArm-M2-S: opening with both False reset it every time).
         self._serial.rts = True
         self._serial.dtr = True
-        self._serial.open()
+        # One program drives the arm at a time: arm_node, probe_arm, calibrate or grasp_trial.
+        self._serial.exclusive = True
+        try:
+            self._serial.open()
+        except serial.SerialException as e:
+            raise RuntimeError(f'cannot open {self.port}: {e}. Is another program (arm_node, '
+                               'probe_arm, calibrate, grasp_trial) still using the arm?') from e
         self._running = True
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
