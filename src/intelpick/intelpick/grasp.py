@@ -56,6 +56,14 @@ class Step:
     z: float = 0.0
     slow: bool = False
     what: str = ''   # for logs and the trial tool's prompts
+    tol: float = 0.0  # metres the arm may stop short; 0 = the strict default (arrive_tolerance)
+
+
+# Hover, lift, travel and release moves only need to get roughly there. Carrying a cube at
+# 33 cm the real M2-S sagged 15-16 mm below a lift target, which the strict tolerance
+# rejected although the grasp was fine. Only moves at grasp height, next to the object, stay
+# strict.
+LOOSE_TOL = 0.03
 
 
 _WAYPOINT_NAMES = {
@@ -75,23 +83,67 @@ def pick_steps(x, y, z_grasp, z_hover, approach='radial', standoff=0.04, offset=
     """
     waypoints = pick_waypoints(x, y, z_grasp, z_hover, approach, standoff, offset)
     steps = [Step('open', what='open the gripper')]
-    steps += [Step('move', wx, wy, wz, slow, name)
+    steps += [Step('move', wx, wy, wz, slow, name, 0.0 if wz == z_grasp else LOOSE_TOL)
               for (wx, wy, wz, slow), name in zip(waypoints, _WAYPOINT_NAMES[approach])]
     gx, gy = waypoints[-1][:2]
     steps += [Step('close', what='close on the object'),
               # Lift before anything else, so a failed grasp never drags across the table.
-              Step('move', gx, gy, z_hover, True, 'lift straight up'),
+              Step('move', gx, gy, z_hover, True, 'lift straight up', LOOSE_TOL),
               Step('close', what='re-check the grip after the lift')]
     return steps
 
 
 def place_steps(x, y, z_place, z_hover):
-    return [Step('move', x, y, z_hover, False, 'over the drop point'),
-            Step('move', x, y, z_place, True, 'down to release height'),
+    return [Step('move', x, y, z_hover, False, 'over the drop point', LOOSE_TOL),
+            Step('move', x, y, z_place, True, 'down to release height', LOOSE_TOL),
             Step('open', what='release'),
-            Step('move', x, y, z_hover, False, 'back up')]
+            Step('move', x, y, z_hover, False, 'back up', LOOSE_TOL)]
 
 
 def is_empty_grip(angle, gripper_closed, margin):
     """Jaws closed almost fully = nothing between them. Unknown angle counts as not empty."""
     return angle is not None and not math.isnan(angle) and angle >= gripper_closed - margin
+
+
+class StuckHolding(RuntimeError):
+    """A move failed while holding an object and setting it back down failed too."""
+
+
+def lift_point(pick):
+    """Where the object was lifted from: the last move of a pick sequence."""
+    return [s for s in pick if s.kind == 'move'][-1]
+
+
+def run_pick_place(run_step, pick, place, put_back, grip_is_empty, log=print):
+    """Run a pick, then a place. run_step(step) executes one Step and returns the measured
+    jaw angle for open/close; it raises RuntimeError when a move fails.
+
+    If anything fails while the object is held, it is set back down where it came from
+    (`put_back` steps) instead of being carried home and dropped by the next pick; the camera
+    sees it again and it gets another try. Raises RuntimeError on any failure, StuckHolding
+    if putting it back failed as well.
+    """
+    holding = False
+    try:
+        angle = math.nan
+        for step in pick:
+            result = run_step(step)
+            if step.kind == 'close':
+                angle, holding = result, True
+        if grip_is_empty(angle):
+            holding = False
+            raise RuntimeError(f'nothing in the gripper (jaws closed to {angle:.2f} rad)')
+        for step in place:
+            run_step(step)
+            if step.kind == 'open':
+                holding = False
+    except RuntimeError as e:
+        if not holding:
+            raise
+        log(f'{e}; setting the object back down where it was picked up')
+        try:
+            for step in put_back:
+                run_step(step)
+        except RuntimeError as e2:
+            raise StuckHolding(f'{e}; putting it back failed too: {e2}') from e2
+        raise

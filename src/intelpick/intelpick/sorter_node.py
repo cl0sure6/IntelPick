@@ -20,7 +20,8 @@ from intelpick_interfaces.msg import DetectionArray
 from intelpick_interfaces.srv import MoveTo, SetGripper
 
 from .calibration import TableCalibration
-from .grasp import is_empty_grip, min_pick_radius, pick_steps, place_steps
+from .grasp import (StuckHolding, is_empty_grip, lift_point, min_pick_radius, pick_steps,
+                    place_steps, run_pick_place)
 
 
 class SorterNode(Node):
@@ -50,6 +51,7 @@ class SorterNode(Node):
         self.stable_tol = self.declare_parameter('stable_tol', 0.01).value
         self.settle_time = self.declare_parameter('settle_time', 1.0).value
         self.max_picks = self.declare_parameter('max_picks', 0).value  # 0 = run forever
+        self.max_failures = self.declare_parameter('max_failures', 3).value  # in a row, then stop
         self.approach = self.declare_parameter('approach', 'radial').value  # radial | vertical
         self.standoff = self.declare_parameter('standoff', 0.04).value
         self.grasp_offset = self.declare_parameter('grasp_offset', 0.0).value
@@ -120,10 +122,10 @@ class SorterNode(Node):
             raise RuntimeError(f'{client.srv_name}: {res.message}')
         return res
 
-    def move(self, x, y, z, slow=False):
+    def move(self, x, y, z, slow=False, tol=0.0):
         speed = self.slow if slow else self.fast
         self.call(self.move_cli, MoveTo.Request(x=float(x), y=float(y), z=float(z),
-                                                speed=float(speed)))
+                                                speed=float(speed), tolerance=float(tol)))
 
     def grip(self, open_):
         return self.call(self.grip_cli, SetGripper.Request(open=open_)).angle
@@ -138,28 +140,27 @@ class SorterNode(Node):
         self.get_logger().info(
             f'{d.label} at ({d.x:.3f}, {d.y:.3f}) m -> bin ({bx:.3f}, {by:.3f})')
         self.ignore_detections_for(1e9)
-        angle = math.nan
-        for step in pick_steps(d.x, d.y, self.z_grasp, self.z_hover, self.approach,
-                               self.standoff, self.grasp_offset):
-            if step.kind == 'close':
-                angle = self.run_step(step)
-            else:
-                self.run_step(step)
-        if self.check_grasp and is_empty_grip(angle, self.gripper_closed, self.empty_margin):
-            raise RuntimeError(f'nothing in the gripper (clamp closed to {angle:.2f} rad)')
-        for step in place_steps(bx, by, self.z_place, self.z_hover):
-            self.run_step(step)
+        pick = pick_steps(d.x, d.y, self.z_grasp, self.z_hover, self.approach,
+                          self.standoff, self.grasp_offset)
+        lift = lift_point(pick)
+        run_pick_place(
+            self.run_step, pick,
+            place=place_steps(bx, by, self.z_place, self.z_hover),
+            put_back=place_steps(lift.x, lift.y, self.z_grasp, self.z_hover),
+            grip_is_empty=lambda a: self.check_grasp and is_empty_grip(
+                a, self.gripper_closed, self.empty_margin),
+            log=self.get_logger().warn)
 
     def run_step(self, step):
         """Execute one grasp.Step; returns the measured clamp angle for open/close."""
         if step.kind == 'move':
-            self.move(step.x, step.y, step.z, step.slow)
+            self.move(step.x, step.y, step.z, step.slow, step.tol)
             return None
         return self.grip(step.kind == 'open')
 
     def run(self):
         self.home()
-        picks = 0
+        picks = failures = 0
         while rclpy.ok() and (not self.max_picks or picks < self.max_picks):
             target = self.stable_target()
             if target is None:
@@ -167,9 +168,18 @@ class SorterNode(Node):
                 continue
             try:
                 self.pick_and_place(target)
-                picks += 1
+                picks, failures = picks + 1, 0
+            except StuckHolding as e:
+                self.get_logger().fatal(f'{e}. Stopping with the object still in the gripper.')
+                return
             except RuntimeError as e:
-                self.get_logger().error(f'pick failed: {e}')
+                failures += 1
+                self.get_logger().error(f'pick failed ({failures}/{self.max_failures}): {e}')
+                if failures >= self.max_failures:
+                    self.home()
+                    self.get_logger().fatal(f'{failures} failures in a row, stopping. Check the '
+                                            'bins are reachable and the objects in the pick zone.')
+                    return
             self.home()
         self.get_logger().info(f'done, {picks} objects sorted')
 

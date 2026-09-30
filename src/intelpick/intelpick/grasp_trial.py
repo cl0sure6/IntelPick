@@ -16,7 +16,7 @@ import os
 
 import yaml
 
-from .grasp import Step, is_empty_grip, pick_steps, place_steps
+from .grasp import Step, is_empty_grip, lift_point, pick_steps, place_steps
 from .roarm import RoArm
 
 
@@ -88,7 +88,7 @@ class Trial:
         if step.kind == 'move':
             spd = self.a.approach_speed if step.slow else self.a.speed
             ok = self.arm.move_to(step.x * 1000, step.y * 1000, step.z * 1000, spd=spd,
-                                  tol=self.a.tolerance * 1000)
+                                  tol=(step.tol or self.a.tolerance) * 1000)
             p, miss = self.arm.last_pose, self.arm.last_error
             where = f'at ({p.x:.0f}, {p.y:.0f}, {p.z:.0f}) mm' if p else 'no feedback'
             print(f'    {"ok" if ok else "MISSED"}, {miss:.0f} mm off, {where}')
@@ -119,7 +119,7 @@ class Trial:
         held = input('>>> is it really holding the object? [y/n] ').strip().lower().startswith('y')
 
         # Put it back where it was picked up (the lift point), gently, at grasp height.
-        lift = [s for s in pick if s.kind == 'move'][-1]
+        lift = lift_point(pick)
         if held:
             for step in place_steps(lift.x, lift.y, z_grasp, z_hover):
                 self.run(step)

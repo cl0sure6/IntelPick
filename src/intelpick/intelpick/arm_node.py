@@ -45,8 +45,9 @@ class ArmNode(Node):
 
     def on_move_to(self, req, res):
         spd = req.speed or self.speed
+        tol = req.tolerance or self.tolerance
         res.success = self.arm.move_to(req.x * 1000, req.y * 1000, req.z * 1000, spd=spd,
-                                       tol=self.tolerance * 1000)
+                                       tol=tol * 1000)
         miss = self.arm.last_error
         res.message = f'stopped {miss:.0f} mm from target' if res.success else (
             f'stopped {miss:.0f} mm from target (unreachable?)' if math.isfinite(miss)

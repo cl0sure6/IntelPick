@@ -91,7 +91,7 @@ ROS topics use **metres**; the JSON protocol uses **millimetres**.
 | # | Milestone | Done when |
 |---|---|---|
 | M0 | USB into WSL | `/dev/video0` and `/dev/ttyUSB0` visible in Ubuntu |
-| M1 | Arm alone | `probe_arm` values in the config (done 2026-09-30); `grasp_trial` holds the object 3/3 at a few spots with the grip check agreeing |
+| M1 | Arm alone | **Done 2026-09-30.** `probe_arm` values in the config; `grasp_trial` (radial, approach_speed 0.05) held 5/5 at 25 cm, 3/3 at (20, 12) cm, 3/3 at 33 cm, grip check right every time |
 | M2 | Vision alone | Stable colour detections in `rqt_image_view` under demo lighting |
 | M3 | Calibration | RMS < 5 mm; arm hovers exactly over a detected object |
 | M4 | Colour sorting loop | 10 objects sorted unattended; log success rate |

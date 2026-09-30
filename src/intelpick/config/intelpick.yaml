@@ -55,6 +55,7 @@ sorter:
     stable_tol: 0.01
     settle_time: 1.0          # s after homing before trusting the camera; must exceed stream lag
     max_picks: 0
+    max_failures: 3           # failed picks in a row before the sorter stops
     # M2-S is 4-DOF: the clamp's pitch can't be commanded, so default to sliding in from the side.
     approach: radial          # radial | vertical
     standoff: 0.04            # radial: descend this far short of the object, then slide out

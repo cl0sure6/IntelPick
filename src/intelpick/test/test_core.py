@@ -6,7 +6,8 @@ import pytest
 
 from intelpick.calibration import TableCalibration
 from intelpick.detectors.color import DEFAULT_COLORS, ColorDetector
-from intelpick.grasp import is_empty_grip, min_pick_radius, pick_steps, pick_waypoints, place_steps
+from intelpick.grasp import (StuckHolding, is_empty_grip, lift_point, min_pick_radius,
+                             pick_steps, pick_waypoints, place_steps, run_pick_place)
 from intelpick.roarm import Pose, RoArm
 
 
@@ -193,3 +194,80 @@ def test_grasp_trial_puts_the_object_back_where_it_was(monkeypatch):
     assert all(np.hypot(x, y) > 150 for x, y, _ in moves)  # never towards the base
     at_grasp_spot = [m for m in moves if m == pytest.approx((250, 0, -90))]
     assert len(at_grasp_spot) == 2  # slide onto it, then set it back down there
+
+
+def test_only_moves_at_grasp_height_are_strict():
+    from intelpick.grasp import LOOSE_TOL
+    for approach in ('radial', 'vertical'):
+        for m in [s for s in pick_steps(0.33, 0.0, -0.09, -0.005, approach) if s.kind == 'move']:
+            assert m.tol == (0.0 if m.z == -0.09 else LOOSE_TOL), (approach, m.what)
+    assert all(s.tol == LOOSE_TOL for s in place_steps(0.05, 0.25, -0.045, -0.005)
+               if s.kind == 'move')
+
+
+def test_grasp_trial_accepts_sag_while_carrying(monkeypatch, capsys):
+    # Real M2-S at 33 cm: the lift stopped 16 mm low under load (strict tolerance is 15).
+    from intelpick import grasp_trial
+    monkeypatch.setattr('sys.argv', ['grasp_trial', '--dry-run', '--auto', '--x', '0.33',
+                                     '--table-z', '-0.105', '--tolerance', '0.015'])
+    monkeypatch.setattr('builtins.input', lambda prompt='': 'y')
+    trial = grasp_trial.Trial(grasp_trial.parse_args())
+    simulate = trial.arm._simulate
+
+    def sags_high_up(cmd):
+        simulate(cmd)
+        if cmd.get('T') == 104 and cmd['z'] > -50:
+            trial.arm._sim_pose = Pose(cmd['x'], cmd['y'], cmd['z'] - 16)
+
+    trial.arm._simulate = sags_high_up
+    trial.main()
+    assert '1/1 held' in capsys.readouterr().out
+
+
+class FakeArm:
+    """run_step stand-in: records steps, fails the ones named in `fail` as (what, x) pairs."""
+
+    def __init__(self, fail=(), close_angle=2.7):
+        self.fail, self.close_angle, self.done = set(fail), close_angle, []
+
+    def run_step(self, step):
+        if (step.what, round(step.x, 3)) in self.fail:
+            raise RuntimeError(f'move "{step.what}" did not arrive')
+        self.done.append((step.what, round(step.x, 3)))
+        return self.close_angle if step.kind == 'close' else 1.6
+
+
+def _cycle(arm):
+    pick = pick_steps(0.25, 0.0, -0.09, -0.005)
+    lift = lift_point(pick)
+    run_pick_place(arm.run_step, pick, place=place_steps(0.05, 0.25, -0.045, -0.005),
+                   put_back=place_steps(lift.x, lift.y, -0.09, -0.005),
+                   grip_is_empty=lambda a: is_empty_grip(a, 3.1, 0.06), log=lambda m: None)
+
+
+def test_pick_place_success_never_puts_back():
+    arm = FakeArm()
+    _cycle(arm)
+    assert ('release', 0.0) in arm.done and ('over the drop point', 0.25) not in arm.done
+
+
+def test_failure_while_holding_sets_object_back_down():
+    arm = FakeArm(fail=[('over the drop point', 0.05)])  # bin unreachable
+    with pytest.raises(RuntimeError) as e:
+        _cycle(arm)
+    assert not isinstance(e.value, StuckHolding)
+    assert arm.done[-4:] == [('over the drop point', 0.25), ('down to release height', 0.25),
+                             ('release', 0.0), ('back up', 0.25)]
+
+
+def test_failure_before_grasp_or_empty_grip_does_not_put_back():
+    for arm in (FakeArm(fail=[('slide out onto the object', 0.25)]), FakeArm(close_angle=3.09)):
+        with pytest.raises(RuntimeError):
+            _cycle(arm)
+        assert ('over the drop point', 0.25) not in arm.done
+
+
+def test_put_back_failing_too_is_stuck_holding():
+    arm = FakeArm(fail=[('over the drop point', 0.05), ('down to release height', 0.25)])
+    with pytest.raises(StuckHolding):
+        _cycle(arm)
