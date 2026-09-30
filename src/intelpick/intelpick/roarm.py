@@ -75,8 +75,11 @@ class RoArm:
         self._serial.port = self.port
         self._serial.baudrate = self.baud
         self._serial.timeout = 0.1
-        self._serial.rts = False  # the ESP32 board resets when RTS/DTR toggle on open
-        self._serial.dtr = False
+        # Keep RTS and DTR both asserted. The board's auto-reset circuit reboots the ESP32 when
+        # only one of them drops, which is what de-asserting them one after the other does
+        # (measured on a RoArm-M2-S: opening with both False reset it every time).
+        self._serial.rts = True
+        self._serial.dtr = True
         self._serial.open()
         self._running = True
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
