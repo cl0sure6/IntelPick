@@ -73,7 +73,8 @@ class FrameSource:
             cap = self._open_stream()
             if cap is None:
                 self.log(f'camera {self.name}: cannot connect, retrying in {backoff:.0f}s '
-                         '(same Wi-Fi? app running? URL right?)')
+                         '(same network? app open? URL right? Phone apps like DroidCam serve '
+                         'one viewer at a time: close browser tabs / the DroidCam PC client)')
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 10.0)
                 continue

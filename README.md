@@ -73,6 +73,16 @@ ros2 launch intelpick intelpick.launch.py model:=m2 serial_port:=/dev/ttyUSB0
 | Wi-Fi security camera | `rtsp://user:pass@<ip>:554/<stream>` (pass on the command line, not in the YAML) |
 
 The phone must be on the same Wi-Fi as the PC; WSL reaches it through Windows, no usbipd needed.
+Two things that bite:
+
+- **University / office Wi-Fi usually blocks device-to-device traffic** (client isolation; the
+  KBTU network does). The page times out even with both on the same network. Turn on the
+  iPhone's Personal Hotspot and join it from the laptop: the phone is then `172.20.10.1`
+  (`http://172.20.10.1:4747/video`). The video stays local and uses no mobile data.
+- **DroidCam serves one viewer at a time.** An open browser tab or the DroidCam PC client
+  takes the slot and everything else gets "DroidCam is Busy". Close them before launching.
+  (The DroidCam PC client isn't needed at all.)
+
 Set the resolution in the app (640×480 is plenty), then calibrate. The calibration records the
 image size and the detector refuses to compute positions if the stream's resolution changes.
 Network streams lag; keep `settle_time` above the lag you see.
