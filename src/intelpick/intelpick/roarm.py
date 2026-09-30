@@ -55,6 +55,8 @@ class RoArm:
         self.m3_pitch = m3_pitch
         self.gripper_angle = GRIPPER_MAX
         self.sent = []  # every command sent, for tests and debugging
+        self.last_pose = None      # where the last move/home actually stopped
+        self.last_error = math.inf  # and how far that was from the target, mm
 
         self._serial = None
         self._reader = None
@@ -62,7 +64,7 @@ class RoArm:
         self._feedback = None
         self._feedback_event = threading.Event()
         self._write_lock = threading.Lock()
-        self._sim_pose = Pose(235.0, 0.0, 234.0)  # dry-run pose, matches the documented init pose
+        self._sim_pose = Pose(315.5, 0.0, 229.6)  # dry-run pose = measured M2-S init pose
         self.sim_jaw_stop = 2.6  # dry-run: jaws stall here as if always closing on an object
 
     # --- connection -------------------------------------------------------------------------
@@ -107,7 +109,10 @@ class RoArm:
             msg = json.loads(line)
         except json.JSONDecodeError:
             return
-        if all(k in msg for k in ('x', 'y', 'z')):
+        # Only real feedback. The firmware echoes every command back, and the echo of a T:104
+        # carries the *target* x/y/z; taking it as a position report made every move look
+        # finished the moment it was sent.
+        if msg.get('T') == 1051 and all(k in msg for k in ('x', 'y', 'z')):
             self._feedback = msg
             self._feedback_event.set()
 
@@ -134,7 +139,7 @@ class RoArm:
     def _simulate(self, cmd):
         t = cmd.get('T')
         if t == 100:
-            self._sim_pose = Pose(235.0, 0.0, 234.0)
+            self._sim_pose = Pose(315.5, 0.0, 229.6)
         elif t in (104, 1041):
             self._sim_pose = Pose(cmd['x'], cmd['y'], cmd['z'])
         elif t == 105:
@@ -160,15 +165,7 @@ class RoArm:
     def home(self, timeout=10.0):
         """Go to the firmware init pose and wait until the arm stops moving."""
         self.send({'T': 100})
-        deadline = time.monotonic() + timeout
-        last = None
-        while time.monotonic() < deadline:
-            time.sleep(0.3)
-            p = self.get_pose(timeout=1.0)
-            if p and last and math.dist((p.x, p.y, p.z), (last.x, last.y, last.z)) < 1.0:
-                return True
-            last = p
-        return False
+        return self._wait_settled(None, 0.0, timeout)
 
     def xyz_cmd(self, x, y, z, spd=0.25):
         """T:104 for this model, keeping the gripper where it is."""
@@ -180,25 +177,36 @@ class RoArm:
         cmd['spd'] = spd
         return cmd
 
-    def move_to(self, x, y, z, spd=0.25, tol=8.0, timeout=10.0):
-        """Move the tool tip to (x, y, z) mm and wait until feedback says it arrived."""
-        self.send(self.xyz_cmd(x, y, z, spd))
-        return self._wait_until_near(Pose(x, y, z), tol, timeout)
+    def move_to(self, x, y, z, spd=0.25, tol=15.0, timeout=10.0):
+        """Move the tool tip to (x, y, z) mm and wait until the arm stops.
 
-    def set_gripper(self, angle, settle=0.6):
-        """Command the gripper and return the angle it actually reached (None if unknown).
+        True if it stopped within `tol` mm of the target. The final pose and the miss distance
+        are kept in `last_pose` / `last_error` so callers can log how accurate the move was.
+        """
+        self.send(self.xyz_cmd(x, y, z, spd))
+        return self._wait_settled(Pose(x, y, z), tol, timeout)
+
+    def set_gripper(self, angle, timeout=3.0):
+        """Command the gripper and return the angle it actually stopped at (None if unknown).
 
         When closing on an object the jaws stall early, so the measured angle stays below the
         commanded one: that is how a caller can tell whether something was grabbed.
         """
         self.gripper_angle = min(max(angle, GRIPPER_MIN), GRIPPER_MAX)
         self.send({'T': 106, 'cmd': self.gripper_angle, 'spd': 0, 'acc': 0})
-        if not self.dry_run:
-            time.sleep(settle)  # the gripper has no completion feedback
-        fb = self.get_feedback()
-        if fb is None or self._gripper_key not in fb:
-            return None
-        return float(fb[self._gripper_key])
+        # No completion signal: wait until the measured angle stops changing.
+        time.sleep(0.0 if self.dry_run else 0.3)
+        deadline = time.monotonic() + timeout
+        last = value = None
+        while time.monotonic() < deadline:
+            fb = self.get_feedback()
+            if fb is not None and self._gripper_key in fb:
+                value = float(fb[self._gripper_key])
+                if last is not None and abs(value - last) < 0.02:
+                    break
+                last = value
+            time.sleep(0.02 if self.dry_run else 0.15)
+        return value
 
     def set_grip_torque(self, percent):
         """Limit the squeeze so the servo doesn't overheat or crush a printed part."""
@@ -207,11 +215,34 @@ class RoArm:
     def set_torque(self, on):
         self.send({'T': 210, 'cmd': 1 if on else 0})
 
-    def _wait_until_near(self, target, tol, timeout):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+    def _wait_settled(self, target, tol, timeout):
+        """Poll feedback until the tip stops moving.
+
+        With a target: True once it has stopped within `tol` mm of it, False if it stops
+        farther away (unreachable, blocked) or the timeout passes. Without one: True once it
+        stops. A request can go unanswered while a blocking move runs; that is fine.
+        """
+        poll = 0.02 if self.dry_run else 0.2
+        start = time.monotonic()
+        last, still = None, 0
+        self.last_pose, self.last_error = None, math.inf
+        while time.monotonic() - start < timeout:
+            time.sleep(poll)
             p = self.get_pose(timeout=1.0)
-            if p and math.dist((p.x, p.y, p.z), (target.x, target.y, target.z)) <= tol:
+            if p is None:
+                continue
+            self.last_pose = p
+            if target is not None:
+                self.last_error = math.dist((p.x, p.y, p.z), (target.x, target.y, target.z))
+            still = still + 1 if last and math.dist(
+                (p.x, p.y, p.z), (last.x, last.y, last.z)) < 1.0 else 0
+            last = p
+            elapsed = time.monotonic() - start
+            if target is None:
+                if still >= 2 and elapsed >= 3 * poll:
+                    return True
+            elif still >= 2 and self.last_error <= tol:
                 return True
-            time.sleep(0.1)
+            elif still >= 5 and elapsed >= 7 * poll:  # parked short of the target
+                return False
         return False

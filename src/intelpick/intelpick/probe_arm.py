@@ -83,7 +83,8 @@ def main():
         found['empty'] = arm.set_gripper(args.closed)
         print(f'closed empty: measured {found["empty"]}')
         arm.set_gripper(1.6)
-        ask('hold a cube/cap between the jaws, then ENTER to close on it')
+        ask('hold a real sorting object (2-3 cm cube or bottle cap, not something thin) '
+            'between the jaws, then ENTER to close on it')
         found['held'] = arm.set_gripper(args.closed)
         print(f'closed on object: measured {found["held"]}')
         arm.set_gripper(1.6)
@@ -91,7 +92,8 @@ def main():
         # 5. Table height, by hand
         ask('torque OFF: support the arm, then press ENTER')
         arm.set_torque(False)
-        ask('move the clamp tip down onto the table by hand, hold it there')
+        ask('move the clamp tip down until it TOUCHES the table surface the objects will lie on, '
+            'hold it there')
         fb = arm.get_feedback()
         found['table_z'] = fb['z']
         print('at table:', fmt(fb))
@@ -104,9 +106,10 @@ def main():
         for r in (120, 160, 200, 250, 300, 350, 400):
             ask(f'move to x={r} mm, y=0, z={z:.0f} mm ({args.clearance:.0f} mm above table). '
                 'Watch how the clamp meets the table')
-            ok = arm.move_to(r, 0, z, spd=0.15, timeout=8)
+            ok = arm.move_to(r, 0, z, spd=0.15, tol=15, timeout=10)
             fb = arm.get_feedback()
-            print(('reached ' if ok else 'NOT reached ') + (fmt(fb) if fb else ''))
+            miss = f'{arm.last_error:.0f} mm off' if math.isfinite(arm.last_error) else 'no feedback'
+            print(('reached, ' if ok else 'NOT reached, ') + miss + '  ' + (fmt(fb) if fb else ''))
             if ok:
                 reached.append(r)
             else:

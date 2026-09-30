@@ -28,6 +28,8 @@ class ArmNode(Node):
             m3_pitch=self.declare_parameter('m3_pitch', 1.57).value,
         )
         self.speed = self.declare_parameter('speed', 0.25).value
+        # A move counts as done when the arm stops within this distance of the target, metres.
+        self.tolerance = self.declare_parameter('arrive_tolerance', 0.015).value
         self.gripper_open = self.declare_parameter('gripper_open', 1.6).value
         self.gripper_closed = self.declare_parameter('gripper_closed', 3.1).value
         grip_torque = self.declare_parameter('grip_torque', 30).value  # % of servo max
@@ -43,8 +45,12 @@ class ArmNode(Node):
 
     def on_move_to(self, req, res):
         spd = req.speed or self.speed
-        res.success = self.arm.move_to(req.x * 1000, req.y * 1000, req.z * 1000, spd=spd)
-        res.message = 'ok' if res.success else 'did not reach target (unreachable or timeout)'
+        res.success = self.arm.move_to(req.x * 1000, req.y * 1000, req.z * 1000, spd=spd,
+                                       tol=self.tolerance * 1000)
+        miss = self.arm.last_error
+        res.message = f'stopped {miss:.0f} mm from target' if res.success else (
+            f'stopped {miss:.0f} mm from target (unreachable?)' if math.isfinite(miss)
+            else 'no feedback from arm (timeout)')
         self.publish_pose()
         return res
 

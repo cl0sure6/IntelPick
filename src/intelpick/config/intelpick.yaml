@@ -35,6 +35,7 @@ arm:
   ros__parameters:
     host: ""                  # set to the arm IP to drive it over Wi-Fi instead of USB
     speed: 0.25
+    arrive_tolerance: 0.015   # m; a move is done when the arm stops this close to the target
     gripper_open: 1.6         # rad; 1.08 = fully open (135 deg), 3.14 = closed
     grip_torque: 30           # % of servo max; enough to hold a cube without cooking the servo
     m3_pitch: 1.57            # M3 only: wrist pitch for a top-down grasp, verify on hardware
@@ -44,11 +45,11 @@ sorter:
     bin_labels: [red, green, blue, yellow]
     # Bin drop points in the arm frame, metres: x0, y0, x1, y1, ... (+X forward, +Y left)
     bin_positions: [0.05, 0.25, 0.15, 0.25, 0.05, -0.25, 0.15, -0.25]
-    table_z: -0.05            # used only when no calibration_file is given
+    table_z: -0.105           # measured by probe_arm (2026-09-30); calibration overrides it
     grasp_height: 0.015       # above the table: about half the object height
     place_height: 0.06
     hover_height: 0.10
-    min_reach: 0.12
+    min_reach: 0.12           # probe_arm: reached 12-40 cm at table height, 4-9 mm off
     max_reach: 0.40
     stable_frames: 5
     stable_tol: 0.01
@@ -61,4 +62,6 @@ sorter:
     speed: 0.0                # travel moves, 0 = arm default
     approach_speed: 0.1       # moves near the object
     check_grasp: true
-    empty_grip_margin: 0.08   # closed within this of gripper_closed = nothing grabbed
+    # Closed within this of gripper_closed = nothing grabbed. probe_arm: empty 3.09 rad,
+    # on a 2-3 cm object 2.99 rad, so the threshold sits at 3.04. Thin objects won't register.
+    empty_grip_margin: 0.06

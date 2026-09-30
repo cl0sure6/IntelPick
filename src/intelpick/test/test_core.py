@@ -7,7 +7,7 @@ import pytest
 from intelpick.calibration import TableCalibration
 from intelpick.detectors.color import DEFAULT_COLORS, ColorDetector
 from intelpick.grasp import min_pick_radius, pick_waypoints
-from intelpick.roarm import RoArm
+from intelpick.roarm import Pose, RoArm
 
 
 def test_color_detector_finds_squares():
@@ -132,3 +132,27 @@ def test_old_calibration_without_workspace_excludes_nothing():
     calib = TableCalibration(np.eye(3), 0.0)
     assert calib.in_workspace(5.0, 5.0)
     assert calib.workspace_pixels() is None
+
+
+def test_command_echo_is_not_position_feedback():
+    # Real firmware echoes each command; the T:104 echo holds the *target* coordinates.
+    arm = RoArm(dry_run=True)
+    arm._handle_line('{"T":104,"x":400,"y":0,"z":203,"t":1.6,"spd":0.15}')
+    assert arm._feedback is None
+    arm._handle_line('{"T":1051,"x":392.3,"y":-10.8,"z":177.0,"t":1.61}')
+    assert arm._feedback['x'] == 392.3
+
+
+def test_move_waits_for_stop_and_reports_miss():
+    arm = RoArm(dry_run=True)
+    simulate = arm._simulate
+
+    def stops_short(cmd):  # arm parks 20 mm short of every target
+        simulate(cmd)
+        if cmd.get('T') == 104:
+            arm._sim_pose = Pose(cmd['x'] - 20, cmd['y'], cmd['z'])
+
+    arm._simulate = stops_short
+    assert not arm.move_to(300, 0, 200, tol=15, timeout=3)
+    assert arm.last_error == pytest.approx(20)
+    assert arm.move_to(300, 0, 200, tol=25, timeout=3)
