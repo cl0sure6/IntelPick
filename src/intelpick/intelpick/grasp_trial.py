@@ -17,19 +17,13 @@ import os
 import yaml
 
 from .grasp import Step, is_empty_grip, lift_point, pick_steps, place_steps
+from .params import installed_params
 from .roarm import RoArm
 
 
 def load_config():
     """(shared, arm, sorter) parameter dicts from the installed config, empty if not found."""
-    try:
-        from ament_index_python.packages import get_package_share_directory
-        path = os.path.join(get_package_share_directory('intelpick'), 'config', 'intelpick.yaml')
-        with open(path) as f:
-            data = yaml.safe_load(f)
-    except Exception:  # not built / not sourced: fall back to the built-in defaults
-        data = {}
-    return tuple((data.get(k) or {}).get('ros__parameters', {}) for k in ('/**', 'arm', 'sorter'))
+    return installed_params('/**', 'arm', 'sorter')
 
 
 def table_z_default(sorter):

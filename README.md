@@ -57,6 +57,10 @@ ros2 run intelpick grasp_trial --x 0.25 --grasp-height 0.01 --standoff 0.05 --op
 ros2 run intelpick arm_node --ros-args -p dry_run:=true
 ros2 service call /arm/move_to intelpick_interfaces/srv/MoveTo "{x: 0.25, y: 0.0, z: 0.05}"
 
+# Tune the HSV colour ranges on the live image: sliders + mask view, right-click an object to
+# set its range; prints the config block to paste. Stop camera_node first (one viewer per phone).
+ros2 run intelpick tune_colors --camera http://<phone-ip>:4747/video
+
 # Camera + detector only, tune HSV while watching the overlay
 ros2 launch intelpick intelpick.launch.py sorter:=false arm:=false
 ros2 launch intelpick intelpick.launch.py sorter:=false arm:=false camera:=http://<phone-ip>:4747/video
