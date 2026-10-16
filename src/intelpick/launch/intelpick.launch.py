@@ -26,7 +26,9 @@ def generate_launch_description():
         'model': 'm2',
         'serial_port': '/dev/ttyUSB0',
         'backend': 'color',
+        'yolo_model': '',  # explicit local trained weights; never auto-download at runtime
         'sorter': 'true',
+        'arm': 'true',
     }
     cfg = {k: LaunchConfiguration(k) for k in args}
     params = cfg['params']
@@ -37,10 +39,12 @@ def generate_launch_description():
         Node(package='intelpick', executable='camera_node', name='camera',
              parameters=[params, {'device': ParameterValue(cfg['camera'], value_type=str)}]),
         Node(package='intelpick', executable='detector_node', name='detector',
-             parameters=[params, calib, {'backend': cfg['backend']}]),
+             parameters=[params, calib, {'backend': cfg['backend'],
+                         'yolo_model': ParameterValue(cfg['yolo_model'], value_type=str)}]),
         Node(package='intelpick', executable='arm_node', name='arm',
              parameters=[params, {'dry_run': cfg['dry_run'], 'model': cfg['model'],
-                                  'serial_port': cfg['serial_port']}]),
+                                  'serial_port': cfg['serial_port']}],
+             condition=IfCondition(cfg['arm'])),
         Node(package='intelpick', executable='sorter_node', name='sorter',
              parameters=[params, calib], condition=IfCondition(cfg['sorter'])),
     ])

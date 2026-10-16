@@ -30,6 +30,8 @@ setup(
             'calibrate = intelpick.calibrate:main',
             'probe_arm = intelpick.probe_arm:main',
             'grasp_trial = intelpick.grasp_trial:main',
+            'capture_dataset = intelpick.capture_dataset:main',
+            'train_yolo = intelpick.train_yolo:main',
         ],
     },
 )

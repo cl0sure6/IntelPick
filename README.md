@@ -1,6 +1,7 @@
 # IntelPick
 
-Webcam + computer vision + Waveshare RoArm: sorts coloured / shaped objects into bins.
+Webcam + YOLO colour recognition + Waveshare RoArm: sorts coloured objects into bins.
+An HSV-only backend is available for initial setup before training weights exist.
 ROS 2 Humble, Python, runs in WSL2 (Ubuntu 22.04).
 
 ```
@@ -14,10 +15,17 @@ Design, assumption check and milestones: [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 ```bash
 source /opt/ros/humble/setup.bash
 cd /mnt/c/Users/adils/IntelPickIRO
-colcon build --symlink-install
+PYTHONNOUSERSITE=1 colcon build --symlink-install
 source install/setup.bash
 colcon test --packages-select intelpick && colcon test-result --all
 ```
+
+`PYTHONNOUSERSITE=1` makes the build ignore Python packages installed with `pip --user`.
+Installing the YOLO requirements puts setuptools 78 into `~/.local`, which breaks ROS
+Humble's build (`canonicalize_version() got an unexpected keyword argument
+'strip_trailing_zero'`). The build only needs the system packages; running still uses the
+`--user` ones (Ultralytics, PyTorch). Without the YOLO packages installed, plain
+`colcon build` works too.
 
 ## Get USB devices into WSL (once per boot)
 
@@ -50,8 +58,8 @@ ros2 run intelpick arm_node --ros-args -p dry_run:=true
 ros2 service call /arm/move_to intelpick_interfaces/srv/MoveTo "{x: 0.25, y: 0.0, z: 0.05}"
 
 # Camera + detector only, tune HSV while watching the overlay
-ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true
-ros2 launch intelpick intelpick.launch.py sorter:=false dry_run:=true camera:=http://<phone-ip>:4747/video
+ros2 launch intelpick intelpick.launch.py sorter:=false arm:=false
+ros2 launch intelpick intelpick.launch.py sorter:=false arm:=false camera:=http://<phone-ip>:4747/video
 ros2 run rqt_image_view rqt_image_view /detections/image
 
 # Calibrate (arm_node must NOT be running). Markers go on the corners of the work mat:
@@ -92,10 +100,23 @@ Only one program can drive the arm at a time (`arm_node`, `probe_arm`, `calibrat
 
 Tunables live in [src/intelpick/config/intelpick.yaml](src/intelpick/config/intelpick.yaml).
 
-## YOLO (shape sorting, milestone M5)
+## Finish the YOLO colour workflow
+
+Motion/grasp bring-up and the camera test have passed. The remaining physical steps are
+collecting labelled images, training/validating the colour model, calibration and a sorting
+trial with the actual bins. The code includes capture/annotation and dataset validation tools.
+
+Follow [docs/YOLO.md](docs/YOLO.md) for setup, training and the full run sequence:
 
 ```bash
-pip install ultralytics "numpy<2"    # numpy<2 keeps ROS cv_bridge working
-yolo train model=yolo26n.pt data=datasets/shapes/data.yaml epochs=80 imgsz=640
-ros2 launch intelpick intelpick.launch.py backend:=yolo   # set yolo_model to runs/.../best.pt
+ros2 run intelpick capture_dataset --camera /dev/video0 --out datasets/colors --split train
+ros2 run intelpick capture_dataset --camera /dev/video0 --out datasets/colors --split val
+ros2 run intelpick train_yolo --data datasets/colors/data.yaml --check-only
+ros2 run intelpick train_yolo --data datasets/colors/data.yaml --epochs 80 --device cpu
+ros2 launch intelpick intelpick.launch.py backend:=yolo \
+  yolo_model:=/absolute/path/to/weights/best.pt sorter:=false arm:=false
 ```
+
+Train detection classes `red`, `green`, `blue`, `yellow`; the default YOLO label mode passes
+them directly to the colour bins. A YOLO + HSV mode also supports shape-trained models.
+The launch default stays `backend:=color` until you explicitly supply trained YOLO weights.

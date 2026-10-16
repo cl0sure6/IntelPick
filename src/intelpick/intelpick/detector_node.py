@@ -37,10 +37,18 @@ class DetectorNode(Node):
             self.detector = self.colors
         elif backend == 'yolo':
             from .detectors.yolo import YoloDetector
-            model = self.declare_parameter('yolo_model', 'yolo26n.pt').value
+            model = self.declare_parameter('yolo_model', '').value
             conf = self.declare_parameter('yolo_conf', 0.5).value
-            tag = self.declare_parameter('yolo_color_tag', True).value
-            self.detector = YoloDetector(model, conf, self.colors if tag else None)
+            mode = self.declare_parameter('yolo_label_mode', 'class').value
+            device = self.declare_parameter('yolo_device', 'cpu').value
+            imgsz = self.declare_parameter('yolo_imgsz', 640).value
+            fraction = self.declare_parameter('color_min_fraction', 0.2).value
+            margin = self.declare_parameter('color_min_margin', 0.05).value
+            self.detector = YoloDetector(
+                model, conf=conf, color_tagger=self.colors, label_mode=mode,
+                min_area=min_area, max_area=max_area, device=device, imgsz=imgsz,
+                color_min_fraction=fraction, color_min_margin=margin)
+            self.get_logger().info(f'YOLO labels: {mode}; model: {model}; device: {device}')
         else:
             raise ValueError(f'unknown backend {backend!r}')
 
@@ -89,7 +97,9 @@ class DetectorNode(Node):
 
         if self.pub_img.get_subscription_count():
             img = self.draw(frame, out, rejected, calib)
-            self.pub_img.publish(self.bridge.cv2_to_imgmsg(img, 'bgr8'))
+            overlay = self.bridge.cv2_to_imgmsg(img, 'bgr8')
+            overlay.header = msg.header
+            self.pub_img.publish(overlay)
 
     def draw(self, frame, out, rejected, calib):
         outline = calib.workspace_pixels() if calib else None
@@ -103,7 +113,7 @@ class DetectorNode(Node):
         for d in out.detections:
             c = (int(d.u), int(d.v))
             cv2.circle(frame, c, 5, (255, 255, 255), -1)
-            text = d.label
+            text = f'{d.label} {d.confidence:.0%}'
             if not math.isnan(d.x):
                 text += f' ({d.x * 100:.0f}, {d.y * 100:.0f}) cm'
             cv2.putText(frame, text, (c[0] + 8, c[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5,

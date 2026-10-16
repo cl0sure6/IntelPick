@@ -9,7 +9,6 @@ import math
 import os
 import threading
 import time
-from collections import deque
 
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
@@ -20,8 +19,9 @@ from intelpick_interfaces.msg import DetectionArray
 from intelpick_interfaces.srv import MoveTo, SetGripper
 
 from .calibration import TableCalibration
-from .grasp import (StuckHolding, is_empty_grip, lift_point, min_pick_radius, pick_steps,
+from .grasp import (StuckHolding, is_empty_grip, lift_point, pick_steps,
                     place_steps, run_pick_place)
+from .tracking import StableTargets
 
 
 class SorterNode(Node):
@@ -31,6 +31,8 @@ class SorterNode(Node):
         labels = self.declare_parameter('bin_labels', ['red', 'green', 'blue', 'yellow']).value
         flat = self.declare_parameter(  # x0, y0, x1, y1, ... metres
             'bin_positions', [0.05, 0.25, 0.15, 0.25, 0.05, -0.25, 0.15, -0.25]).value
+        if not labels or len(set(labels)) != len(labels):
+            raise ValueError('bin_labels must be nonempty and unique')
         if len(flat) != 2 * len(labels):
             raise ValueError('bin_positions must hold one (x, y) pair per bin label')
         self.bins = {lbl: (flat[2 * i], flat[2 * i + 1]) for i, lbl in enumerate(labels)}
@@ -50,6 +52,8 @@ class SorterNode(Node):
         self.stable_frames = self.declare_parameter('stable_frames', 5).value
         self.stable_tol = self.declare_parameter('stable_tol', 0.01).value
         self.settle_time = self.declare_parameter('settle_time', 1.0).value
+        self.detection_max_age = self.declare_parameter('detection_max_age', 1.0).value
+        min_confidence = self.declare_parameter('min_confidence', 0.5).value
         self.max_picks = self.declare_parameter('max_picks', 0).value  # 0 = run forever
         self.max_failures = self.declare_parameter('max_failures', 3).value  # in a row, then stop
         self.approach = self.declare_parameter('approach', 'radial').value  # radial | vertical
@@ -61,7 +65,13 @@ class SorterNode(Node):
         self.check_grasp = self.declare_parameter('check_grasp', True).value
         self.empty_margin = self.declare_parameter('empty_grip_margin', 0.08).value
         self.gripper_closed = self.declare_parameter('gripper_closed', 3.1).value
-        self.min_pick_r = min_pick_radius(self.min_reach, self.approach, self.standoff)
+        if self.settle_time < 0 or self.max_picks < 0 or self.max_failures < 1:
+            raise ValueError('settle_time and max_picks must be >= 0; max_failures must be >= 1')
+        self.targets = StableTargets(
+            self.bins, stable_frames=self.stable_frames, stable_tol=self.stable_tol,
+            max_age=self.detection_max_age, min_reach=self.min_reach, max_reach=self.max_reach,
+            approach=self.approach, standoff=self.standoff, offset=self.grasp_offset,
+            min_confidence=min_confidence)
         for lbl, (bx, by) in self.bins.items():
             if not self.min_reach <= math.hypot(bx, by) <= self.max_reach:
                 raise ValueError(f'bin {lbl!r} at ({bx}, {by}) is outside the reach limits')
@@ -71,40 +81,47 @@ class SorterNode(Node):
         self.home_cli = self.create_client(Trigger, 'arm/home')
 
         self._lock = threading.Lock()
-        self._frames = deque(maxlen=self.stable_frames)
         self._accept_after = 0.0
+        self._accept_stamp_ns = 0
+        self._last_stamp_ns = 0
         self.create_subscription(DetectionArray, 'detections', self.on_detections, 10)
 
     # --- perception -------------------------------------------------------------------------
 
     def on_detections(self, msg):
-        if time.monotonic() < self._accept_after:
-            return
         with self._lock:
-            self._frames.append([d for d in msg.detections if self.pickable(d)])
+            now = time.monotonic()
+            stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+            age = (self.get_clock().now().nanoseconds - stamp_ns) / 1e9
+            if now < self._accept_after:
+                return
+            if stamp_ns <= self._accept_stamp_ns or not 0 <= age <= self.detection_max_age:
+                self.targets.clear()
+                return
+            if stamp_ns <= self._last_stamp_ns:
+                return  # a duplicated / out-of-order frame cannot add evidence of stability
+            self._last_stamp_ns = stamp_ns
+            unknown = sorted({d.label for d in msg.detections if d.label not in self.bins})
+            if unknown:
+                self.get_logger().warn(
+                    f'No bin configured for labels: {unknown}. Match bin_labels to model classes '
+                    'or use yolo_label_mode: color for HSV colour bins.', throttle_duration_sec=5.0)
+            self.targets.update(msg.detections, now)
 
     def pickable(self, d):
-        if d.label not in self.bins or math.isnan(d.x):
-            return False
-        return self.min_pick_r <= math.hypot(d.x, d.y) <= self.max_reach
+        return self.targets.pickable(d)
 
     def stable_target(self):
         """Closest object to the arm that appears in every one of the last N frames."""
         with self._lock:
-            if len(self._frames) < self.stable_frames:
-                return None
-            frames = list(self._frames)
-        for d in sorted(frames[-1], key=lambda d: math.hypot(d.x, d.y)):
-            if all(any(o.label == d.label and
-                       math.hypot(o.x - d.x, o.y - d.y) <= self.stable_tol for o in f)
-                   for f in frames[:-1]):
-                return d
-        return None
+            return self.targets.target(time.monotonic())
 
     def ignore_detections_for(self, seconds):
         with self._lock:
-            self._frames.clear()
-        self._accept_after = time.monotonic() + seconds
+            self.targets.clear()
+            self._accept_after = time.monotonic() + seconds
+            self._accept_stamp_ns = self.get_clock().now().nanoseconds + int(seconds * 1e9)
+            self._last_stamp_ns = 0
 
     # --- motion -----------------------------------------------------------------------------
 
@@ -115,9 +132,15 @@ class SorterNode(Node):
         deadline = time.monotonic() + timeout
         while not future.done():
             if time.monotonic() > deadline:
+                future.cancel()
                 raise RuntimeError(f'{client.srv_name} timed out')
+            if not rclpy.ok():
+                future.cancel()
+                raise RuntimeError('ROS shut down while waiting for the arm')
             time.sleep(0.02)
         res = future.result()
+        if res is None:
+            raise RuntimeError(f'{client.srv_name}: no response')
         if not res.success:
             raise RuntimeError(f'{client.srv_name}: {res.message}')
         return res
@@ -189,11 +212,14 @@ def main():
     node = SorterNode()
     executor = MultiThreadedExecutor()
     executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
     try:
         node.run()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
+        spin_thread.join()
         node.destroy_node()
         rclpy.try_shutdown()

@@ -25,9 +25,16 @@ class ColorDetector:
                 Several ranges per colour are allowed (red wraps around H=0, so it needs two).
         """
         self.ranges = {}
+        if not 0 <= min_area <= max_area:
+            raise ValueError('need 0 <= min_area <= max_area')
         for name, flat in colors.items():
             if len(flat) == 0 or len(flat) % 6:
                 raise ValueError(f'color {name!r}: need a multiple of 6 values, got {len(flat)}')
+            for i in range(0, len(flat), 6):
+                lo, hi = flat[i:i + 3], flat[i + 3:i + 6]
+                if any(not np.isfinite(v) or int(v) != v for v in (*lo, *hi)) or any(
+                        not 0 <= a <= b <= limit for a, b, limit in zip(lo, hi, (179, 255, 255))):
+                    raise ValueError(f'color {name!r}: invalid OpenCV HSV bounds')
             self.ranges[name] = [
                 (np.array(flat[i:i + 3], np.uint8), np.array(flat[i + 3:i + 6], np.uint8))
                 for i in range(0, len(flat), 6)
@@ -59,13 +66,21 @@ class ColorDetector:
                 blobs.append(Blob(name, min(fill, 1.0), u, v, math.radians(deg), area))
         return blobs
 
-    def dominant_color(self, bgr):
+    def dominant_color(self, bgr, min_fraction=0.2, min_margin=0.05):
         """Colour covering the most pixels of a crop, or None. Used to colour-tag YOLO boxes."""
+        if not 0 <= min_fraction <= 1 or not 0 <= min_margin <= 1:
+            raise ValueError('color fraction and margin must be in [0, 1]')
         if bgr.size == 0:
             return None
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         counts = {name: cv2.countNonZero(self.mask(hsv, name)) for name in self.ranges}
-        best = max(counts, key=counts.get, default=None)
-        if best is None or counts[best] < 0.2 * bgr.shape[0] * bgr.shape[1]:
+        ranked = sorted(counts, key=counts.get, reverse=True)
+        if not ranked:
+            return None
+        best = ranked[0]
+        pixels = bgr.shape[0] * bgr.shape[1]
+        second = counts[ranked[1]] if len(ranked) > 1 else 0
+        if counts[best] == 0 or counts[best] < min_fraction * pixels or (
+                len(ranked) > 1 and counts[best] - second <= min_margin * pixels):
             return None
         return best
