@@ -8,6 +8,15 @@ from .camera_source import FrameSource
 from .dataset import COLOR_CLASSES, init_dataset, save_sample
 
 
+def draw_hints(image, *lines):
+    """White text with a dark outline, readable on any table; the window title is often cut off."""
+    for i, line in enumerate(lines):
+        org = (10, 25 + 22 * i)
+        cv2.putText(image, line, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 4)
+        cv2.putText(image, line, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    return image
+
+
 def annotate(frame):
     """Freeze a frame and collect hand-drawn boxes; no HSV-generated training labels."""
     preview = frame.copy()
@@ -15,12 +24,16 @@ def annotate(frame):
     window = 'Draw object box: ENTER accept, ESC finish boxes'
     try:
         while True:
-            x, y, w, h = cv2.selectROI(window, preview, showCrosshair=True, fromCenter=False)
+            # selectROI returns the drawn box on ESC too, so ESC only finishes with nothing drawn.
+            select = draw_hints(
+                preview.copy(), 'Drag a box around one object, ENTER to accept',
+                f'ESC with no box drawn: save photo, next ({len(annotations)} boxes)')
+            x, y, w, h = cv2.selectROI(window, select, showCrosshair=True, fromCenter=False)
             if w == 0 or h == 0:
                 return annotations
             prompt = preview.copy()
-            cv2.putText(prompt, '1 red | 2 green | 3 blue | 4 yellow | ESC discard box',
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.rectangle(prompt, (x, y), (x + w, y + h), (255, 255, 255), 2)
+            draw_hints(prompt, '1 red | 2 green | 3 blue | 4 yellow | ESC discard box')
             cv2.imshow(window, prompt)
             while True:
                 key = cv2.waitKey(30) & 0xFF
@@ -56,9 +69,8 @@ def main():
                 latest = frame
             # A displayed old frame must not be saved again as if it were a new capture.
             if latest is not None:
-                preview = latest.copy()
-                cv2.putText(preview, f'{args.split}: SPACE label | B background | Q quit',
-                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                preview = draw_hints(latest.copy(),
+                                     f'{args.split}: SPACE label | B background | Q quit')
                 cv2.imshow('IntelPick dataset', preview)
             key = cv2.waitKey(30) & 0xFF
             if key in (ord('q'), 27):
@@ -76,7 +88,8 @@ def main():
                 print('No boxes; sample skipped. B explicitly saves background.')
                 continue
             path = save_sample(config.parent, args.split, fresh, annotations)
-            print(f'Saved {path.name}: {len(annotations)} objects')
+            print(f'Saved {path.name}: {len(annotations)} objects. Back to the live view '
+                  '(click it if keys do nothing); rearrange and press SPACE for the next photo.')
     finally:
         cam.close()
         cv2.destroyAllWindows()
