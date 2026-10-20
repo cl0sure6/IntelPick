@@ -64,14 +64,23 @@ ros2 run intelpick capture_dataset --camera /dev/video0 --out datasets/colors --
 ros2 run intelpick capture_dataset --camera http://172.20.10.1:4747/video --out datasets/colors --split train
 ```
 
-- **SPACE** freezes a fresh frame. Draw a box tightly around one object; **ENTER** accepts it.
-- Press **1 red**, **2 green**, **3 blue**, or **4 yellow** to label that box.
-- Repeat for **every object** in the frozen image. **ESC** in the box selection finishes
-  the image and saves it. **ESC** at the colour prompt discards that box.
+- **SPACE** freezes a fresh frame. The HSV detector (ranges from the installed config, as
+  tuned with `tune_colors`) suggests a coloured box for each object it finds.
+- Check every box. Click one to select it, then **1 red**, **2 green**, **3 blue** or
+  **4 yellow** to recolour it; **D** or right-click deletes it; drag on the image to add a box
+  HSV missed (it shows a magenta `?` until you give it a colour). **TAB** cycles through the
+  boxes, **H** hides the help text if it covers an object.
+- **ENTER** saves the photo with the boxes shown and returns to the live view. **ESC** skips
+  the photo without saving.
 - **B** in the live view saves an explicitly reviewed empty-table/background frame. Use it
-  only when no target objects are present. **Q** exits the live view.
+  only when no target objects are present. If HSV sees objects, B opens the same check
+  window first; delete the false boxes and ENTER saves what is left (none = background).
+  **Q** exits the live view.
 
-Labels are manual; the tool does not use HSV predictions as training truth.
+The suggestions only save drawing; you are still the source of truth. Pressing ENTER without
+looking would teach YOLO to copy HSV, mistakes included. Fix boxes that are loose, cut off,
+on shadows, bins or distractors, and keep photos where HSV gets it wrong (after fixing them):
+those are what the network learns from beyond HSV. `--no-suggest` starts every photo empty.
 Start with roughly 200 varied training images, balanced across colours, positions, object
 sizes, orientations, shadows and combinations. This is a starting target, not an accuracy
 guarantee. Include some empty-table images and non-target distractors.

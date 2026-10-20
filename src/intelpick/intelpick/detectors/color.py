@@ -50,21 +50,29 @@ class ColorDetector:
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, self._kernel)
         return cv2.morphologyEx(m, cv2.MORPH_CLOSE, self._kernel)
 
-    def detect(self, bgr):
+    def _contours(self, bgr):
+        """(colour, contour, area) for every blob within the area limits."""
         hsv = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2HSV)
-        blobs = []
         for name in self.ranges:
             contours, _ = cv2.findContours(self.mask(hsv, name), cv2.RETR_EXTERNAL,
                                            cv2.CHAIN_APPROX_SIMPLE)
             for c in contours:
                 area = cv2.contourArea(c)
-                if not self.min_area <= area <= self.max_area:
-                    continue
-                (u, v), (w, h), deg = cv2.minAreaRect(c)
-                # How well the blob fills its bounding rectangle: ~1 for cubes, ~0.785 for caps.
-                fill = area / max(w * h, 1.0)
-                blobs.append(Blob(name, min(fill, 1.0), u, v, math.radians(deg), area))
+                if self.min_area <= area <= self.max_area:
+                    yield name, c, area
+
+    def detect(self, bgr):
+        blobs = []
+        for name, c, area in self._contours(bgr):
+            (u, v), (w, h), deg = cv2.minAreaRect(c)
+            # How well the blob fills its bounding rectangle: ~1 for cubes, ~0.785 for caps.
+            fill = area / max(w * h, 1.0)
+            blobs.append(Blob(name, min(fill, 1.0), u, v, math.radians(deg), area))
         return blobs
+
+    def boxes(self, bgr):
+        """(colour, x, y, w, h): axis-aligned pixel box of every blob, as a dataset label needs."""
+        return [(name, *cv2.boundingRect(c)) for name, c, _ in self._contours(bgr)]
 
     def dominant_color(self, bgr, min_fraction=0.2, min_margin=0.05):
         """Colour covering the most pixels of a crop, or None. Used to colour-tag YOLO boxes."""
