@@ -1,10 +1,14 @@
 """capture_dataset suggestion and review logic, without opening a window."""
 
+import os
+
 import cv2
 import numpy as np
+import pytest
 
-from intelpick.capture_dataset import Review, suggest
-from intelpick.dataset import COLOR_CLASSES, check_rows, init_dataset, save_sample
+from intelpick.capture_dataset import Review, label_file, reject, saved_photos, suggest
+from intelpick.dataset import (COLOR_CLASSES, check_rows, init_dataset, label_text, pixel_boxes,
+                               save_sample)
 from intelpick.detectors.color import DEFAULT_COLORS, ColorDetector
 
 
@@ -91,3 +95,44 @@ def test_tab_cycles_selection_and_render_keeps_frame_untouched():
     view = review.render((10, 10, 40, 40))
     assert view.shape == img.shape and not np.array_equal(view, img)
     assert np.array_equal(img, _scene())
+
+
+def test_saved_labels_round_trip_to_the_same_pixel_boxes():
+    boxes = [(0, 100, 100, 60, 60), (3, 0, 0, 1280, 720), (2, 1201, 37, 79, 11)]
+    assert pixel_boxes(label_text(boxes, 1280, 720), 1280, 720) == boxes
+
+
+def _saved(tmp_path, count):
+    root = init_dataset(tmp_path / 'colors').parent
+    images = []
+    for i in range(count):
+        images.append(save_sample(root, 'train', _scene(), [(i % 4, 10 * i, 10, 50, 50)]))
+        os.utime(images[-1], (1000 + i, 1000 + i))  # capture order independent of uuid names
+    return root, images
+
+
+def test_review_lists_photos_in_capture_order_and_limits_to_newest(tmp_path):
+    root, images = _saved(tmp_path, 4)
+    assert saved_photos(root, 'train') == images
+    assert saved_photos(root, 'train', newest=2) == images[2:]
+    assert label_file(images[0]) == root / 'labels' / 'train' / f'{images[0].stem}.txt'
+
+
+def test_rejected_photo_and_labels_move_next_to_the_dataset(tmp_path):
+    root, images = _saved(tmp_path, 2)
+    label = label_file(images[0]).read_text()
+    target = reject(images[0])
+    assert target == tmp_path / 'colors_rejected'
+    assert (target / 'images' / 'train' / images[0].name).exists()
+    assert (target / 'labels' / 'train' / f'{images[0].stem}.txt').read_text() == label
+    assert saved_photos(root, 'train') == images[1:]
+
+
+def test_reject_never_overwrites_an_earlier_rejected_photo(tmp_path):
+    root, images = _saved(tmp_path, 1)
+    clash = tmp_path / 'colors_rejected' / 'labels' / 'train' / f'{images[0].stem}.txt'
+    clash.parent.mkdir(parents=True)
+    clash.write_text('keep me\n')
+    with pytest.raises(FileExistsError):
+        reject(images[0])
+    assert images[0].exists() and clash.read_text() == 'keep me\n'

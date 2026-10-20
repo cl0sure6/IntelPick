@@ -57,17 +57,34 @@ def check_rows(text, class_count, source):
     return rows
 
 
-def save_sample(root, split, frame, annotations, class_count=4):
-    """annotations: (class_id, pixel x, y, width, height). Empty means reviewed background."""
-    if split not in ('train', 'val'):
-        raise ValueError('split must be train or val')
-    height, width = frame.shape[:2]
+def label_text(annotations, width, height, class_count=4):
+    """YOLO label file text for (class_id, pixel x, y, width, height) boxes, checked."""
     lines = []
     for cls, x, y, w, h in annotations:
         lines.append(f'{cls} {(x + w / 2) / width:.8f} {(y + h / 2) / height:.8f} '
                      f'{w / width:.8f} {h / height:.8f}')
     text = '\n'.join(lines) + ('\n' if lines else '')
     check_rows(text, class_count, 'captured annotations')
+    return text
+
+
+def pixel_boxes(text, width, height, class_count=4, source='labels'):
+    """Inverse of label_text: (class_id, pixel x, y, width, height) for each row."""
+    boxes = []
+    for cls, cx, cy, w, h in check_rows(text, class_count, source):
+        x0, y0 = round((cx - w / 2) * width), round((cy - h / 2) * height)
+        x1, y1 = round((cx + w / 2) * width), round((cy + h / 2) * height)
+        boxes.append((cls, max(x0, 0), max(y0, 0), min(x1, width) - max(x0, 0),
+                      min(y1, height) - max(y0, 0)))
+    return boxes
+
+
+def save_sample(root, split, frame, annotations, class_count=4):
+    """annotations: (class_id, pixel x, y, width, height). Empty means reviewed background."""
+    if split not in ('train', 'val'):
+        raise ValueError('split must be train or val')
+    height, width = frame.shape[:2]
+    text = label_text(annotations, width, height, class_count)
     root = Path(root).expanduser().resolve()
     stem = uuid4().hex
     image = root / 'images' / split / f'{stem}.jpg'

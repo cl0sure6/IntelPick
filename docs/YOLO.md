@@ -81,6 +81,20 @@ The suggestions only save drawing; you are still the source of truth. Pressing E
 looking would teach YOLO to copy HSV, mistakes included. Fix boxes that are loose, cut off,
 on shadows, bins or distractors, and keep photos where HSV gets it wrong (after fixing them):
 those are what the network learns from beyond HSV. `--no-suggest` starts every photo empty.
+
+Keep supports and clutter out of the sort colours (cover a red book or blue bottle holding the
+camera with plain paper) and never box them: unlabelled, they teach the network what to ignore.
+
+To fix photos already saved, review them without the camera. `--newest N` limits it to the
+last N captured:
+
+```bash
+ros2 run intelpick capture_dataset --out ~/datasets/colors --split train --review --newest 25
+```
+
+Each photo opens in the same check window with its saved boxes. **ENTER** saves the fixes and
+moves on, **ESC** keeps the photo as it was, **P** goes back, **X** moves the photo and its
+labels to `<dataset>_rejected/` next to the dataset (nothing is deleted), **Q** quits.
 Start with roughly 200 varied training images, balanced across colours, positions, object
 sizes, orientations, shadows and combinations. This is a starting target, not an accuracy
 guarantee. Include some empty-table images and non-target distractors.
