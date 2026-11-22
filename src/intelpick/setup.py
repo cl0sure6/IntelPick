@@ -33,6 +33,7 @@ setup(
             'capture_dataset = intelpick.capture_dataset:main',
             'train_yolo = intelpick.train_yolo:main',
             'tune_colors = intelpick.tune_colors:main',
+            'edit_labels = intelpick.edit_labels:main',
         ],
     },
 )

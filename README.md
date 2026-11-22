@@ -17,15 +17,16 @@ source /opt/ros/humble/setup.bash
 cd /mnt/c/Users/adils/IntelPickIRO
 PYTHONNOUSERSITE=1 colcon build --symlink-install
 source install/setup.bash
-colcon test --packages-select intelpick && colcon test-result --all
+PYTHONNOUSERSITE=1 colcon test --packages-select intelpick && colcon test-result --all
 ```
 
-`PYTHONNOUSERSITE=1` makes the build ignore Python packages installed with `pip --user`.
+`PYTHONNOUSERSITE=1` makes build and test ignore Python packages installed with `pip --user`.
 Installing the YOLO requirements puts setuptools 78 into `~/.local`, which breaks ROS
 Humble's build (`canonicalize_version() got an unexpected keyword argument
-'strip_trailing_zero'`). The build only needs the system packages; running still uses the
-`--user` ones (Ultralytics, PyTorch). Without the YOLO packages installed, plain
-`colcon build` works too.
+'strip_trailing_zero'`) and, worse, makes `colcon test` silently run **0 tests** and report
+success while `colcon test-result` keeps showing old results. Build and test only need the
+system packages; running still uses the `--user` ones (Ultralytics, PyTorch). Without the
+YOLO packages installed, plain `colcon build` / `colcon test` work too.
 
 ## Get USB devices into WSL (once per boot)
 
@@ -60,6 +61,11 @@ ros2 service call /arm/move_to intelpick_interfaces/srv/MoveTo "{x: 0.25, y: 0.0
 # Tune the HSV colour ranges on the live image: sliders + mask view, right-click an object to
 # set its range; prints the config block to paste. Stop camera_node first (one viewer per phone).
 ros2 run intelpick tune_colors --camera http://<phone-ip>:4747/video
+
+# Review and fix boxes of photos already in the dataset (click, D delete, 1-4 colour, A add,
+# R move photo out). Backs up the labels before the first change.
+ros2 run intelpick edit_labels --data ~/datasets/colors/data.yaml --newest 10
+ros2 run intelpick edit_labels --data ~/datasets/colors/data.yaml --split val
 
 # Camera + detector only, tune HSV while watching the overlay
 ros2 launch intelpick intelpick.launch.py sorter:=false arm:=false
